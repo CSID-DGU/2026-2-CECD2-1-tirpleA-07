@@ -1,8 +1,10 @@
-# 2026-1-CECD1-3-tripleA-07
+# 2026-2-CECD2-1-tirpleA-07
 
 ## Description
 
-> This is the repository for Team TripleA, Class 03, in Dongguk University's Capstone Design 1 course (Spring 2026).
+> This is the repository for Team TripleA, Class 01, in Dongguk University's Capstone Design 2 course (Fall 2026).
+>
+> Continued from [2026-1-CECD1-3-tripleA-07](https://github.com/CSID-DGU/2026-1-CECD1-3-tripleA-07) (Capstone Design 1, Spring 2026).
 >
 > Trip-A: An AI-powered marketing automation service for travel agency e-commerce products.
 
