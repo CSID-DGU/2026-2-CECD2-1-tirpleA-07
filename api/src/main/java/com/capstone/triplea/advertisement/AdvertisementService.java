@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -29,6 +30,10 @@ public class AdvertisementService {
 
     // 발행할 콘텐츠와 PUBLISH 시도 id
     public record PublishTarget(Long attemptId, AdContent content) {
+    }
+
+    // 생성 시도 결과 (알림에 필요한 실패 정보와 거절 사유 포함)
+    public record GenerateResult(AttemptResult result, FailedStage failedStage, String errorMessage, String reviewReason) {
     }
 
     // 광고 생성 요청을 PENDING으로 저장 (상품 저장과 같은 트랜잭션에서 호출)
@@ -57,32 +62,55 @@ public class AdvertisementService {
 
     // agent 응답을 저장하고 시도 결과를 반환 (SUCCESS면 발행 단계로 진행)
     @Transactional
-    public AttemptResult completeGenerate(Long attemptId, AgentGenerateResponseDto response) {
+    public GenerateResult completeGenerate(Long attemptId, AgentGenerateResponseDto response) {
         AdAttempt attempt = findAttempt(attemptId);
         AdEvent event = attempt.getEvent();
 
-        switch (response.status()) {
-            case APPROVED -> {
-                if (response.content() == null) {
-                    attempt.fail(FailedStage.AGENT_CALL, "승인 응답에 콘텐츠 없음");
-                    event.fail();
-                    break;
+        // 계약상 필수 값이 빠진 응답은 agent 호출 실패로 처리
+        List<String> missing = missingFields(response);
+        if (!missing.isEmpty()) {
+            attempt.fail(FailedStage.AGENT_CALL, "agent 응답에 필수 값 없음: " + String.join(", ", missing));
+            event.fail();
+        } else {
+            switch (response.status()) {
+                case APPROVED -> {
+                    attempt.succeed();
+                    saveGeneration(attempt, response);
                 }
-                attempt.succeed();
-                saveGeneration(attempt, response);
-            }
-            case REJECTED -> {
-                attempt.reject();
-                saveGeneration(attempt, response);
-                event.reject();
-            }
-            case FAILED -> {
-                attempt.fail(response.failedStage(), response.errorMessage());
-                event.fail();
+                case REJECTED -> {
+                    attempt.reject();
+                    saveGeneration(attempt, response);
+                    event.reject();
+                }
+                case FAILED -> {
+                    attempt.fail(response.failedStage(), response.errorMessage());
+                    event.fail();
+                }
             }
         }
         log.info("[생성 시도 종료] eventId={}, attemptId={}, result={}", event.getId(), attemptId, attempt.getResult());
-        return attempt.getResult();
+
+        String reviewReason = response.review() == null ? null : response.review().reason();
+        return new GenerateResult(attempt.getResult(), attempt.getFailedStage(), attempt.getErrorMessage(), reviewReason);
+    }
+
+    // 승인·거절 응답에 반드시 있어야 하는 값 중 빠진 것
+    private List<String> missingFields(AgentGenerateResponseDto response) {
+        List<String> missing = new ArrayList<>();
+        AgentGenerateResponseDto.Status status = response.status();
+        if (status == AgentGenerateResponseDto.Status.FAILED) {
+            return missing;
+        }
+        if (response.draft() == null) {
+            missing.add("draft");
+        }
+        if (response.review() == null) {
+            missing.add("review");
+        }
+        if (status == AgentGenerateResponseDto.Status.APPROVED && response.content() == null) {
+            missing.add("content");
+        }
+        return missing;
     }
 
     // agent 호출 자체가 실패한 경우 (연결 실패, 비정상 응답 등)

@@ -1,7 +1,6 @@
 package com.capstone.triplea.advertisement.event;
 
 import com.capstone.triplea.advertisement.AdvertisementService;
-import com.capstone.triplea.advertisement.AttemptResult;
 import com.capstone.triplea.advertisement.client.DiscordNotifier;
 import com.capstone.triplea.advertisement.client.FacebookPublisher;
 import com.capstone.triplea.advertisement.dto.AgentGenerateRequestDto;
@@ -51,13 +50,13 @@ public class AdEventListener {
             return;
         }
 
-        AttemptResult result = advertisementService.completeGenerate(request.attemptId(), response);
-        switch (result) {
+        AdvertisementService.GenerateResult result = advertisementService.completeGenerate(request.attemptId(), response);
+        switch (result.result()) {
             case SUCCESS -> publish(eventId);
-            case REJECTED -> discordNotifier.notifyRejected(eventId, response.review().reason());
+            case REJECTED -> discordNotifier.notifyRejected(eventId, result.reviewReason());
             default -> discordNotifier.notifyFailed(eventId,
-                    response.failedStage() == null ? "AGENT_CALL" : response.failedStage().name(),
-                    response.errorMessage() == null ? "승인 응답에 콘텐츠 없음" : response.errorMessage());
+                    result.failedStage() == null ? "-" : result.failedStage().name(),
+                    result.errorMessage());
         }
     }
 
