@@ -20,7 +20,7 @@ public class DiscordNotifier {
 
     private static final int COLOR_PUBLISHED = 7855479;
     private static final int COLOR_REJECTED = 15548997;
-    private static final int COLOR_FAILED = 15548997;
+    private static final int COLOR_FAILED = 15105570;   // 주황 (거절과 구분)
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
     private final WebClient webClient;
