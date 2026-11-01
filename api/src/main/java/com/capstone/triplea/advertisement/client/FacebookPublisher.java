@@ -11,12 +11,16 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.util.List;
 
 // Facebook 페이지 게시 (agent의 sns_adapter에서 이전)
 @Slf4j
 @Component
 public class FacebookPublisher {
+
+    // Facebook 응답 대기 시간. 넘으면 예외 (게시됐을 수 있으므로 재발행 전 확인 필요)
+    private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     private final WebClient webClient;
     private final String pageId;
@@ -44,7 +48,7 @@ public class FacebookPublisher {
                 .body(BodyInserters.fromFormData(form))
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block();
+                .block(TIMEOUT);
 
         String postId = (response == null || !response.hasNonNull("id")) ? null : response.get("id").asText();
         if (postId == null || !postId.contains("_")) {
