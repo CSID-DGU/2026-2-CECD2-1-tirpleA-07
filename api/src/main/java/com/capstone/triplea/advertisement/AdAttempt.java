@@ -87,14 +87,14 @@ public class AdAttempt {
         close(AttemptResult.REJECTED);
     }
 
-    // 실패 (PUBLISH는 확실히 게시되지 않은 경우만)
+    // 실패 (PUBLISH는 타임아웃·게시 후 저장 실패 포함, 게시됐을 수 있으므로 재발행 전 게시 여부 확인)
     public void fail(FailedStage failedStage, String errorMessage) {
         close(AttemptResult.FAILED);
         this.failedStage = failedStage;
         this.errorMessage = truncate(errorMessage);
     }
 
-    // PUBLISH: 게시 여부를 알 수 없음 (타임아웃, 5xx 등)
+    // 현재 쓰지 않음 (발행 단계 실패는 FAILED로 기록)
     public void unknown(String errorMessage) {
         requireType(AttemptType.PUBLISH);
         close(AttemptResult.UNKNOWN);
