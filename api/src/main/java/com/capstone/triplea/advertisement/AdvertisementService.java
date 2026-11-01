@@ -7,8 +7,6 @@ import com.capstone.triplea.advertisement.dto.AgentGenerateResponseDto;
 import com.capstone.triplea.advertisement.value.AdContent;
 import com.capstone.triplea.advertisement.value.ProductSnapshot;
 import com.capstone.triplea.product.Product;
-import com.capstone.triplea.product.ProductRepository;
-import com.capstone.triplea.product.exception.ProductNotFoundException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,8 +20,6 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class AdvertisementService {
-    private final AdvertisementRepository advertisementRepository;
-    private final ProductRepository productRepository;
     private final AdEventRepository adEventRepository;
     private final AdAttemptRepository adAttemptRepository;
     private final AdGenerationRepository adGenerationRepository;
@@ -158,23 +154,6 @@ public class AdvertisementService {
     private AdAttempt findAttempt(Long attemptId) {
         return adAttemptRepository.findById(attemptId)
                 .orElseThrow(() -> new IllegalStateException("처리 시도 없음: attemptId=" + attemptId));
-    }
-
-    // AI Agent 응답을 받아 광고 이력 저장
-    @Transactional
-    public AdvertisementResponseDto save(Long productId, AdEventType eventType, String adContent, String adUrl) {
-        Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new ProductNotFoundException(productId));
-        Advertisement advertisement = Advertisement.builder()
-                .product(product)
-                .eventType(eventType)
-                .adUrl(adUrl)
-                .adContent(adContent)
-                .build();
-        Advertisement saved = advertisementRepository.save(advertisement);
-        log.info("[광고 이력 저장] id={}, productId={}, eventType={}, adUrl={}", saved.getId(), productId, eventType, adUrl);
-
-        return AdvertisementResponseDto.from(saved);
     }
 
     // 특정 상품의 광고 이력 전체 조회
