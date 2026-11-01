@@ -18,4 +18,4 @@ def discord_send_message(title: str, description: str, url: str | None, color: i
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }]
     }
-    requests.post(DISCORD_API_URL, json=message)
+    requests.post(DISCORD_API_URL, json=message, timeout=5)

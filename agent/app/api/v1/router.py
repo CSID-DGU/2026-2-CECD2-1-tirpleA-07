@@ -1,14 +1,18 @@
 import json
+import logging
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.common.enum.event_type import EventType
+from app.common.dto.agent_result import AgentResult, FailedStage, GenerateRequest
 from app.common.dto.product import Product
-from app.service.marketing import product_marketing
-from app.service.review import product_reviewing
+from app.service.marketing import generate_draft, product_marketing
+from app.service.review import product_reviewing, review_draft
 from app.util.discord_logger import discord_send_message
 from app.util.sns_adapter import call_facebook_api
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/agent",
@@ -108,3 +112,50 @@ async def start_review_flow(body: ReviewRequest):
         "productOld": body.product_old,
         "aiResponse": ai_response
     }
+
+# 생성 + 심의 (발행은 api가 담당)
+# 처리 결과와 무관하게 항상 200으로 AgentResult를 반환하고, 실패하면 실패 단계와 메시지만 담는다
+@router.post("/generate", response_model=AgentResult)
+async def generate(body: GenerateRequest) -> AgentResult:
+    tag = f"eventId: {body.event_id} / attemptId: {body.attempt_id}"
+    _notify(
+        "🚀 Agent Generation Started",
+        f"- {body.event_type.value} 유형 이벤트 수신\n- {tag}",
+        3447003
+    )
+
+    try:
+        draft = await generate_draft(body.event_type, body.is_sample, body.product_new, body.product_old)
+    except Exception as e:
+        logger.exception("마케팅 단계 실패 (%s)", tag)
+        return AgentResult.failed(body.attempt_id, FailedStage.MARKETING, _describe(e))
+
+    _notify("✨ Marketing Content Generated", draft.model_dump_json(exclude_none=True), 9109759)
+
+    try:
+        outcome = await review_draft(body.event_type, body.is_sample, body.product_new, body.product_old, draft)
+    except Exception as e:
+        logger.exception("심의 단계 실패 (%s)", tag)
+        return AgentResult.failed(body.attempt_id, FailedStage.REVIEW, _describe(e))
+
+    _notify(
+        "🔍 Content Reviewed",
+        f"- 판정: {'승인' if outcome.accepted else '거절'}\n- {tag}\n\n{outcome.review.reason}",
+        16753920
+    )
+
+    if outcome.accepted:
+        return AgentResult.approved(body.attempt_id, draft, outcome.content, outcome.review)
+    return AgentResult.rejected(body.attempt_id, draft, outcome.review)
+
+
+# Discord 전송 실패가 처리 결과에 영향을 주지 않도록 예외를 기록만 함
+def _notify(title: str, description: str, color: int):
+    try:
+        discord_send_message(title, description, None, color)
+    except Exception:
+        logger.exception("Discord 전송 실패: %s", title)
+
+
+def _describe(e: Exception) -> str:
+    return f"{type(e).__name__}: {e}"
