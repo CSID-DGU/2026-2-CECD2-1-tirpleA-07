@@ -47,7 +47,7 @@ public class AdvertisementService {
     // GENERATE 시도를 기록하고 agent 요청을 만든다
     @Transactional
     public AgentGenerateRequestDto startGenerate(Long eventId) {
-        AdEvent event = findEvent(eventId);
+        AdEvent event = occupyEvent(eventId);
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.GENERATE, AttemptTrigger.AUTO));
         ProductSnapshot snapshot = event.getProductSnapshot();
         return new AgentGenerateRequestDto(
@@ -125,7 +125,7 @@ public class AdvertisementService {
     // PUBLISH 시도를 기록하고 승인 콘텐츠를 반환
     @Transactional
     public PublishTarget startPublish(Long eventId) {
-        AdEvent event = findEvent(eventId);
+        AdEvent event = occupyEvent(eventId);
         AdAttempt approved = adAttemptRepository
                 .findFirstByEventIdAndAttemptTypeAndResultOrderByStartedAtDescIdDesc(
                         eventId, AttemptType.GENERATE, AttemptResult.SUCCESS)
@@ -172,6 +172,16 @@ public class AdvertisementService {
             review.issues().forEach(issue -> adGenerationIssueRepository.save(
                     AdGenerationIssue.of(generation, issue.field(), issue.phrase(), issue.reason())));
         }
+    }
+
+    // 시도 시작 전 이벤트 선점: PENDING이고 진행 중인 시도가 없어야 하며, version 증가로 동시 시작을 막음
+    private AdEvent occupyEvent(Long eventId) {
+        AdEvent event = findEvent(eventId);
+        if (adAttemptRepository.existsByEventIdAndResultIsNull(eventId)) {
+            throw new IllegalStateException("진행 중인 시도 있음: eventId=" + eventId);
+        }
+        event.touch();
+        return event;
     }
 
     private AdEvent findEvent(Long eventId) {
