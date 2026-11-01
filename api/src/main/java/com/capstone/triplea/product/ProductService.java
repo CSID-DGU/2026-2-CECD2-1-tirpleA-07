@@ -1,10 +1,12 @@
 package com.capstone.triplea.product;
 
 import com.capstone.triplea.advertisement.AdEventType;
+import com.capstone.triplea.advertisement.AdvertisementService;
+import com.capstone.triplea.advertisement.event.AdEventCreated;
+import com.capstone.triplea.advertisement.value.ProductSnapshot;
 import com.capstone.triplea.product.dto.ProductCreateRequestDto;
 import com.capstone.triplea.product.dto.ProductResponseDto;
 import com.capstone.triplea.product.dto.ProductUpdateRequestDto;
-import com.capstone.triplea.product.event.ProductEvent;
 import com.capstone.triplea.product.exception.ProductNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -20,6 +22,7 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final ProductMapper productMapper;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final AdvertisementService advertisementService;
 
     // ADM_PRD_001: 상품 등록
     @Transactional
@@ -28,14 +31,10 @@ public class ProductService {
         Product saved =  productRepository.save(product);
 
         // TRG_PRD_001: 상품 등록
-        // 동작 규칙 1: 등록 성공 시에만 발행
-        applicationEventPublisher.publishEvent(
-        ProductEvent.builder()
-                .id(saved.getId())
-                .eventType(AdEventType.NEW)
-                .productNew(ProductEvent.ProductSnapshot.from(saved))
-                .build()
-        );
+        // 동작 규칙 1: 등록 성공 시에만 발행 (광고 이벤트를 상품과 같은 트랜잭션에서 PENDING으로 저장)
+        Long eventId = advertisementService.createEvent(
+                saved, AdEventType.NEW, ProductSnapshot.ofNew(ProductSnapshot.ProductInfo.from(saved)));
+        applicationEventPublisher.publishEvent(new AdEventCreated(eventId));
 
         return productMapper.toDto(saved);
     }
@@ -45,20 +44,16 @@ public class ProductService {
     public ProductResponseDto updateProduct(Long id, ProductUpdateRequestDto dto) {
         Product product = findProductThrow(id);
 
-        ProductEvent.ProductSnapshot oldSnapshot = ProductEvent.ProductSnapshot.from(product);
+        ProductSnapshot.ProductInfo oldInfo = ProductSnapshot.ProductInfo.from(product);
         productMapper.updateEntity(dto, product); // null 필드는 자동으로 건너뜀
 
         // TRG_PRD_002: 상품 수정
         // 동작 규칙 1: 가격 변경이 감지될 경우에만 발행 (가격 감소 시에만)
-        if (oldSnapshot.getPrice() > product.getPrice()) {    // oldPrice != product.getPrice() <- 변경이 감지될때
-            applicationEventPublisher.publishEvent(
-            ProductEvent.builder()
-                    .id(product.getId())
-                    .eventType(AdEventType.DISCOUNT)
-                    .productNew(ProductEvent.ProductSnapshot.from(product))
-                    .productOld(oldSnapshot)
-                    .build()
-            );
+        if (oldInfo.price() > product.getPrice()) {    // oldPrice != product.getPrice() <- 변경이 감지될때
+            Long eventId = advertisementService.createEvent(
+                    product, AdEventType.DISCOUNT,
+                    ProductSnapshot.ofDiscount(ProductSnapshot.ProductInfo.from(product), oldInfo));
+            applicationEventPublisher.publishEvent(new AdEventCreated(eventId));
         }
 
         return productMapper.toDto(product);

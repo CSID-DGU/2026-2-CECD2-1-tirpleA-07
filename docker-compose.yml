@@ -11,7 +11,7 @@ services:
     depends_on:
       - agent
     environment:
-      AGENT_URL: http://agent:8000/api/v1/agent/marketing
+      AGENT_URL: http://agent:8000/api/v1/agent/generate
 
   agent:
     build: ./agent
