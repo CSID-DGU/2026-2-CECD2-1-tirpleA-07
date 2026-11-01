@@ -50,7 +50,17 @@ public class AdEventListener {
             return;
         }
 
-        AdvertisementService.GenerateResult result = advertisementService.completeGenerate(request.attemptId(), response);
+        // 응답 저장 실패(필수 값 누락, 길이 초과 등)는 agent 응답 문제로 보고 실패로 기록
+        AdvertisementService.GenerateResult result;
+        try {
+            result = advertisementService.completeGenerate(request.attemptId(), response);
+        } catch (Exception e) {
+            String message = "응답 저장 실패: " + describe(e);
+            advertisementService.failGenerate(request.attemptId(), message);
+            discordNotifier.notifyFailed(eventId, "AGENT_CALL", message);
+            return;
+        }
+
         switch (result.result()) {
             case SUCCESS -> publish(eventId);
             case REJECTED -> discordNotifier.notifyRejected(eventId, result.reviewReason());
