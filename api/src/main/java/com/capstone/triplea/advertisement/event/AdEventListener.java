@@ -13,12 +13,17 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
+
 // 광고 처리 흐름: 생성(agent) -> 발행(Facebook)
 // 외부 호출은 트랜잭션 밖에서 하고, 앞뒤 상태는 AdvertisementService가 짧은 트랜잭션으로 저장
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AdEventListener {
+
+    // agent 응답 대기 시간 (생성 + 5회 투표 심의). 넘으면 AGENT_CALL 실패로 기록
+    private static final Duration AGENT_TIMEOUT = Duration.ofSeconds(120);
 
     private final WebClient agentWebClient;
     private final AdvertisementService advertisementService;
@@ -39,7 +44,7 @@ public class AdEventListener {
                     .bodyValue(request)
                     .retrieve()
                     .bodyToMono(AgentGenerateResponseDto.class)
-                    .block();
+                    .block(AGENT_TIMEOUT);
             if (response == null || response.status() == null) {
                 throw new IllegalStateException("agent 응답 없음");
             }
