@@ -78,20 +78,28 @@ public class AdEventListener {
     private void publish(Long eventId) {
         AdvertisementService.PublishTarget target = advertisementService.startPublish(eventId);
 
-        // Facebook 호출 실패만 발행 실패로 기록 (FAILED = 게시되지 않음)
+        // 발행 단계의 실패는 모두 FAILED로 기록 (게시됐을 수 있으므로 재발행 전 게시 여부 확인 필요)
         String postUrl;
         try {
             postUrl = facebookPublisher.publish(target.content());
         } catch (Exception e) {
-            String message = describe(e);
-            advertisementService.failPublish(target.attemptId(), message);
-            discordNotifier.notifyFailed(eventId, "PUBLISH", message);
+            failPublish(eventId, target.attemptId(), describe(e));
             return;
         }
 
-        // 게시 이후의 저장 실패는 FAILED로 기록하지 않음 (게시됐으므로 시도가 열린 채 남음)
-        advertisementService.completePublish(target.attemptId(), target.content(), postUrl);
+        // 게시 후 저장 실패는 게시글을 추적할 수 있도록 URL을 메시지에 남김
+        try {
+            advertisementService.completePublish(target.attemptId(), target.content(), postUrl);
+        } catch (Exception e) {
+            failPublish(eventId, target.attemptId(), "게시 후 저장 실패 (url=" + postUrl + "): " + describe(e));
+            return;
+        }
         discordNotifier.notifyPublished(eventId, target.content().title(), postUrl);
+    }
+
+    private void failPublish(Long eventId, Long attemptId, String message) {
+        advertisementService.failPublish(attemptId, message);
+        discordNotifier.notifyFailed(eventId, "PUBLISH", message);
     }
 
     private static String describe(Exception e) {
