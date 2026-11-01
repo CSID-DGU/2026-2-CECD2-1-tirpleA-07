@@ -9,6 +9,8 @@ import com.capstone.triplea.advertisement.value.ProductSnapshot;
 import com.capstone.triplea.product.Product;
 import com.capstone.triplea.product.ProductRepository;
 import com.capstone.triplea.product.exception.ProductNotFoundException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ public class AdvertisementService {
     private final AdGenerationRepository adGenerationRepository;
     private final AdGenerationIssueRepository adGenerationIssueRepository;
     private final AdPostRepository adPostRepository;
+    private final ObjectMapper objectMapper;
 
     // 발행할 콘텐츠와 PUBLISH 시도 id
     public record PublishTarget(Long attemptId, AdContent content) {
@@ -181,12 +184,20 @@ public class AdvertisementService {
     */
     @Transactional(readOnly = true)
     public List<AdvertisementResponseDto> findAdvertisements(Long productId) {
-        List<Advertisement> advertisements = (productId != null)
-                ? advertisementRepository.findByProductIdOrderByCreatedAtDesc(productId)
-                : advertisementRepository.findAllByOrderByCreatedAtDesc();
+        List<AdPost> posts = (productId != null)
+                ? adPostRepository.findByEventProductIdOrderByCreatedAtDesc(productId)
+                : adPostRepository.findAllByOrderByCreatedAtDesc();
 
-        return advertisements.stream()
-                .map(AdvertisementResponseDto::from)
+        return posts.stream()
+                .map(post -> AdvertisementResponseDto.from(post, toJson(post.getContent())))
                 .toList();
+    }
+
+    private String toJson(AdContent content) {
+        try {
+            return objectMapper.writeValueAsString(content);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("광고 콘텐츠 직렬화 실패", e);
+        }
     }
 }
