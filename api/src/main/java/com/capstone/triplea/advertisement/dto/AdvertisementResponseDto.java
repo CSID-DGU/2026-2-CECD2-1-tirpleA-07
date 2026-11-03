@@ -1,7 +1,7 @@
 package com.capstone.triplea.advertisement.dto;
 
 import com.capstone.triplea.advertisement.AdEventType;
-import com.capstone.triplea.advertisement.Advertisement;
+import com.capstone.triplea.advertisement.AdPost;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -17,15 +17,15 @@ public class AdvertisementResponseDto {
     private String adContent;
     private LocalDateTime createdAt;
 
-    public static AdvertisementResponseDto from(Advertisement advertisement) {
+    // 게시물(AD_POST) 기준 응답. 기존 응답 형식을 유지하기 위해 콘텐츠는 JSON 문자열로 내려줌
+    public static AdvertisementResponseDto from(AdPost post, String adContent) {
         return AdvertisementResponseDto.builder()
-                .id(advertisement.getId())
-                .productId(advertisement.getProduct().getId())
-                .eventType(advertisement.getEventType())
-                .adUrl(advertisement.getAdUrl())
-                .adContent(advertisement.getAdContent())
-                .createdAt(advertisement.getCreatedAt())
+                .id(post.getId())
+                .productId(post.getEvent().getProduct().getId())
+                .eventType(post.getEvent().getEventType())
+                .adUrl(post.getAdUrl())
+                .adContent(adContent)
+                .createdAt(post.getCreatedAt())
                 .build();
     }
-
 }
