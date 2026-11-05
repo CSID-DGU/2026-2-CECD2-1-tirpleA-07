@@ -1,0 +1,68 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')            // 첫 이미지 빌드는 패키지가 커서 오래 걸림
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+        DEPLOY_DIR = '/home/opc/project/2026-1-CECD1-3-tripleA-07'
+    }
+
+    stages {
+        stage('Detect Changes') {
+            steps {
+                script {
+                    def base
+                    if (env.CHANGE_ID) {
+                        sh "git fetch --no-tags origin +refs/heads/${env.CHANGE_TARGET}:refs/remotes/origin/${env.CHANGE_TARGET}"
+                        base = "origin/${env.CHANGE_TARGET}"
+                    } else {
+                        base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: 'HEAD~1'
+                    }
+                    sh "git diff --name-only ${base}...HEAD"
+                    def hit = sh(script: "git diff --name-only ${base}...HEAD | grep -qE '^(agent/|docker-compose.yml)'", returnStatus: true)
+                    env.AGENT_CHANGED = (hit == 0) ? 'true' : 'false'
+                    echo "AGENT_CHANGED=${env.AGENT_CHANGED}"
+                }
+            }
+        }
+
+        stage('Build Image') {
+            when { environment name: 'AGENT_CHANGED', value: 'true' }
+            steps {
+                // requirements 설치까지 포함해 이미지가 정상적으로 만들어지는지 확인
+                sh 'docker build -t triplea-agent:ci agent'
+            }
+        }
+
+        stage('Syntax Check') {
+            when { environment name: 'AGENT_CHANGED', value: 'true' }
+            steps {
+                // 만든 이미지 안에서 모든 .py 파일을 컴파일만 해봄 (문법 오류 검출, .env 없이도 가능)
+                sh 'docker run --rm triplea-agent:ci python -m compileall -q app'
+            }
+        }
+
+        stage('Approve Deploy') {
+            when { allOf { branch 'main'; environment name: 'AGENT_CHANGED', value: 'true' } }
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: 'agent를 운영 서버에 배포할까요?', ok: 'Deploy'
+                }
+            }
+        }
+
+        stage('Deploy') {
+            when { allOf { branch 'main'; environment name: 'AGENT_CHANGED', value: 'true' } }
+            steps {
+                dir(env.DEPLOY_DIR) {
+                    sh 'git pull --ff-only origin main'
+                    sh 'docker compose up -d --build --no-deps agent'
+                }
+            }
+        }
+    }
+}
