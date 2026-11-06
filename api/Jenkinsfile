@@ -32,6 +32,22 @@ pipeline {
                 }
             }
         }
+        
+        stage('Static Analysis') {
+            when { environment name: 'API_CHANGED', value: 'true' }
+            steps {
+                dir('api') {
+                    // ignoreFailures = true라서 경고가 있어도 빌드는 실패하지 않음
+                    sh './gradlew checkstyleMain --no-daemon'
+                }
+            }
+            post {
+                always {
+                    // 보고서를 빌드 결과에 첨부 (다음 Build 단계의 clean이 지우기 전에 보관)
+                    archiveArtifacts artifacts: 'api/build/reports/checkstyle/*', allowEmptyArchive: true
+                }
+            }
+        }
 
         stage('Build') {
             when { environment name: 'API_CHANGED', value: 'true' }

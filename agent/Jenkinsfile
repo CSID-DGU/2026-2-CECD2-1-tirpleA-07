@@ -37,6 +37,15 @@ pipeline {
                 sh 'docker build -t triplea-agent:ci agent'
             }
         }
+        
+        stage('Static Analysis') {
+            when { environment name: 'AGENT_CHANGED', value: 'true' }
+            steps {
+                // ruff는 운영 이미지에 넣지 않고, 검사할 때만 임시 컨테이너에 설치해서 실행
+                // --exit-zero: 경고가 있어도 실패하지 않음 ("설정만")
+                sh 'docker run --rm triplea-agent:ci sh -c "pip install -q ruff==0.8.4 && ruff check app --exit-zero --statistics"'
+            }
+        }
 
         stage('Syntax Check') {
             when { environment name: 'AGENT_CHANGED', value: 'true' }
