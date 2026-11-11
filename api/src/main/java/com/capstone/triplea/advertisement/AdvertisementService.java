@@ -4,6 +4,8 @@ import com.capstone.triplea.advertisement.dto.AdvertisementResponseDto;
 
 import com.capstone.triplea.advertisement.dto.AgentGenerateRequestDto;
 import com.capstone.triplea.advertisement.dto.AgentGenerateResponseDto;
+import com.capstone.triplea.advertisement.recovery.AttemptView;
+import com.capstone.triplea.advertisement.recovery.RecoveryPolicy;
 import com.capstone.triplea.advertisement.value.AdContent;
 import com.capstone.triplea.advertisement.value.ProductSnapshot;
 import com.capstone.triplea.product.Product;
@@ -28,13 +30,16 @@ public class AdvertisementService {
     private final AdGenerationIssueRepository adGenerationIssueRepository;
     private final AdPostRepository adPostRepository;
     private final ObjectMapper objectMapper;
+    private final RecoveryPolicy recoveryPolicy;
 
     // 발행할 콘텐츠와 PUBLISH 시도 id
     public record PublishTarget(Long attemptId, AdContent content) {
     }
 
     // 생성 시도 결과 (알림에 필요한 실패 정보와 거절 사유 포함)
-    public record GenerateResult(AttemptResult result, FailedStage failedStage, String errorMessage, String reviewReason) {
+    // eventStatus는 시도를 닫은 뒤의 이벤트 상태: 실패해도 자동 재시도가 남아 있으면 PENDING
+    public record GenerateResult(AttemptResult result, FailedStage failedStage, String errorMessage,
+                                 String reviewReason, AdEventStatus eventStatus) {
     }
 
     // 광고 생성 요청을 PENDING으로 저장 (상품 저장과 같은 트랜잭션에서 호출)
@@ -49,6 +54,11 @@ public class AdvertisementService {
     @Transactional
     public AgentGenerateRequestDto startGenerate(Long eventId, AttemptTrigger trigger) {
         AdEvent event = occupyEvent(eventId);
+        // 승인 콘텐츠가 이미 있으면 다음 할 일은 발행 (늦게 실행된 작업이 다시 생성하는 것을 막음)
+        if (adAttemptRepository.existsByEventIdAndAttemptTypeAndResult(
+                eventId, AttemptType.GENERATE, AttemptResult.SUCCESS)) {
+            throw new IllegalStateException("승인된 생성 시도가 이미 있음: eventId=" + eventId);
+        }
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.GENERATE, trigger));
         ProductSnapshot snapshot = event.getProductSnapshot();
         return new AgentGenerateRequestDto(
@@ -75,8 +85,7 @@ public class AdvertisementService {
         // 계약상 필수 값이 빠진 응답은 agent 호출 실패로 처리
         List<String> missing = missingFields(response);
         if (!missing.isEmpty()) {
-            attempt.fail(FailedStage.AGENT_CALL, "agent 응답에 필수 값 없음: " + String.join(", ", missing));
-            event.fail();
+            closeFailed(attempt, FailedStage.AGENT_CALL, "agent 응답에 필수 값 없음: " + String.join(", ", missing));
         } else {
             switch (response.status()) {
                 case APPROVED -> {
@@ -89,16 +98,16 @@ public class AdvertisementService {
                     event.reject();
                 }
                 case FAILED -> {
-                    attempt.fail(response.failedStage(), response.errorMessage());
-                    event.fail();
+                    closeFailed(attempt, response.failedStage(), response.errorMessage());
                 }
             }
         }
-        log.info("[생성 시도 종료] eventId={}, attemptId={}, result={}", event.getId(), attemptId, attempt.getResult());
+        log.info("[생성 시도 종료] eventId={}, attemptId={}, result={}, eventStatus={}",
+                event.getId(), attemptId, attempt.getResult(), event.getStatus());
 
         String reviewReason = response.review() == null ? null : response.review().reason();
-        return Optional.of(
-                new GenerateResult(attempt.getResult(), attempt.getFailedStage(), attempt.getErrorMessage(), reviewReason));
+        return Optional.of(new GenerateResult(
+                attempt.getResult(), attempt.getFailedStage(), attempt.getErrorMessage(), reviewReason, event.getStatus()));
     }
 
     // 승인·거절 응답에 반드시 있어야 하는 값 중 빠진 것
@@ -120,18 +129,17 @@ public class AdvertisementService {
         return missing;
     }
 
-    // agent 호출 자체가 실패한 경우 (연결 실패, 비정상 응답 등). 이미 닫힌 시도면 저장하지 않고 false
+    // agent 호출 자체가 실패한 경우 (연결 실패, 비정상 응답 등). 이미 닫힌 시도면 저장하지 않음
     @Transactional
-    public boolean failGenerate(Long attemptId, String errorMessage) {
+    public CloseResult failGenerate(Long attemptId, String errorMessage) {
         AdAttempt attempt = findAttemptForClose(attemptId);
         if (!attempt.isOpen()) {
             logDiscarded(attempt, "생성 실패: " + errorMessage);
-            return false;
+            return CloseResult.DISCARDED;
         }
-        attempt.fail(FailedStage.AGENT_CALL, errorMessage);
-        attempt.getEvent().fail();
-        log.warn("[생성 시도 실패] attemptId={}, message={}", attemptId, errorMessage);
-        return true;
+        CloseResult closed = closeFailed(attempt, FailedStage.AGENT_CALL, errorMessage);
+        log.warn("[생성 시도 실패] attemptId={}, closed={}, message={}", attemptId, closed, errorMessage);
+        return closed;
     }
 
     // PUBLISH 시도를 기록하고 승인 콘텐츠를 반환
@@ -168,18 +176,33 @@ public class AdvertisementService {
         return true;
     }
 
-    // 발행 실패: 이벤트 FAILED. 이미 닫힌 시도면 저장하지 않고 false
+    // 발행 실패. 이미 닫힌 시도면 저장하지 않음
     @Transactional
-    public boolean failPublish(Long attemptId, String errorMessage) {
+    public CloseResult failPublish(Long attemptId, String errorMessage) {
         AdAttempt attempt = findAttemptForClose(attemptId);
         if (!attempt.isOpen()) {
             logDiscarded(attempt, "발행 실패: " + errorMessage);
-            return false;
+            return CloseResult.DISCARDED;
         }
-        attempt.fail(FailedStage.PUBLISH, errorMessage);
-        attempt.getEvent().fail();
-        log.warn("[발행 실패] attemptId={}, message={}", attemptId, errorMessage);
-        return true;
+        CloseResult closed = closeFailed(attempt, FailedStage.PUBLISH, errorMessage);
+        log.warn("[발행 실패] attemptId={}, closed={}, message={}", attemptId, closed, errorMessage);
+        return closed;
+    }
+
+    // 시도를 FAILED로 닫고, 그 단계의 자동 재시도를 모두 썼을 때만 이벤트를 FAILED로 바꿈
+    // 재시도가 남았으면 이벤트는 PENDING으로 두고 복구 스케줄러가 다시 시도
+    private CloseResult closeFailed(AdAttempt attempt, FailedStage failedStage, String errorMessage) {
+        attempt.fail(failedStage, errorMessage);
+        AdEvent event = attempt.getEvent();
+        List<AttemptView> attempts = adAttemptRepository.findByEventIdOrderByStartedAtAscIdAsc(event.getId())
+                .stream()
+                .map(AttemptView::from)
+                .toList();
+        if (recoveryPolicy.isExhausted(attempts, attempt.getAttemptType())) {
+            event.fail();
+            return CloseResult.EVENT_FAILED;
+        }
+        return CloseResult.RETRY_PENDING;
     }
 
     private void saveGeneration(AdAttempt attempt, AgentGenerateResponseDto response) {

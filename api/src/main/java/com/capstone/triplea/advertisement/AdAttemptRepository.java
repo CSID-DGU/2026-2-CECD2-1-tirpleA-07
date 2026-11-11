@@ -29,6 +29,9 @@ public interface AdAttemptRepository extends JpaRepository<AdAttempt, Long> {
     @Query("select a from AdAttempt a where a.id = :id")
     Optional<AdAttempt> findWithLockById(@Param("id") Long id);
 
+    // 종류·결과별 시도 존재 여부 - 승인된 GENERATE 시도 확인 등
+    boolean existsByEventIdAndAttemptTypeAndResult(Long eventId, AttemptType attemptType, AttemptResult result);
+
     // 진행 중인 시도 존재 여부 (시도 시작 전 확인)
     boolean existsByEventIdAndResultIsNull(Long eventId);
 }

@@ -66,9 +66,14 @@ public class AdPipeline {
         switch (result.result()) {
             case SUCCESS -> publish(eventId, trigger);
             case REJECTED -> discordNotifier.notifyRejected(eventId, result.reviewReason());
-            default -> discordNotifier.notifyFailed(eventId,
-                    result.failedStage() == null ? "-" : result.failedStage().name(),
-                    result.errorMessage());
+            default -> {
+                String stage = result.failedStage() == null ? "-" : result.failedStage().name();
+                if (result.eventStatus() == AdEventStatus.FAILED) {
+                    discordNotifier.notifyFailed(eventId, stage, result.errorMessage());
+                } else {
+                    logRetryPending(eventId, stage, result.errorMessage());
+                }
+            }
         }
     }
 
@@ -99,15 +104,24 @@ public class AdPipeline {
     }
 
     private void failGenerate(Long eventId, Long attemptId, String message) {
-        if (advertisementService.failGenerate(attemptId, message)) {
-            discordNotifier.notifyFailed(eventId, "AGENT_CALL", message);
-        }
+        report(eventId, "AGENT_CALL", message, advertisementService.failGenerate(attemptId, message));
     }
 
     private void failPublish(Long eventId, Long attemptId, String message) {
-        if (advertisementService.failPublish(attemptId, message)) {
-            discordNotifier.notifyFailed(eventId, "PUBLISH", message);
+        report(eventId, "PUBLISH", message, advertisementService.failPublish(attemptId, message));
+    }
+
+    // 실패 알림은 자동 재시도를 모두 써서 이벤트가 FAILED가 됐을 때만 보냄
+    private void report(Long eventId, String stage, String message, CloseResult closed) {
+        switch (closed) {
+            case EVENT_FAILED -> discordNotifier.notifyFailed(eventId, stage, message);
+            case RETRY_PENDING -> logRetryPending(eventId, stage, message);
+            case DISCARDED -> { }
         }
+    }
+
+    private void logRetryPending(Long eventId, String stage, String message) {
+        log.warn("[시도 실패, 자동 재시도 대기] eventId={}, stage={}, message={}", eventId, stage, message);
     }
 
     private static String describe(Exception e) {
