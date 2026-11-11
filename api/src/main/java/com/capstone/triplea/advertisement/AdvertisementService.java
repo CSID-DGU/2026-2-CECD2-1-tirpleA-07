@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -61,9 +62,14 @@ public class AdvertisementService {
     }
 
     // agent 응답을 저장하고 시도 결과를 반환 (SUCCESS면 발행 단계로 진행)
+    // 이미 닫힌 시도면 저장하지 않고 빈 값을 반환
     @Transactional
-    public GenerateResult completeGenerate(Long attemptId, AgentGenerateResponseDto response) {
-        AdAttempt attempt = findAttempt(attemptId);
+    public Optional<GenerateResult> completeGenerate(Long attemptId, AgentGenerateResponseDto response) {
+        AdAttempt attempt = findAttemptForClose(attemptId);
+        if (!attempt.isOpen()) {
+            logDiscarded(attempt, "agent 응답 status=" + response.status());
+            return Optional.empty();
+        }
         AdEvent event = attempt.getEvent();
 
         // 계약상 필수 값이 빠진 응답은 agent 호출 실패로 처리
@@ -91,7 +97,8 @@ public class AdvertisementService {
         log.info("[생성 시도 종료] eventId={}, attemptId={}, result={}", event.getId(), attemptId, attempt.getResult());
 
         String reviewReason = response.review() == null ? null : response.review().reason();
-        return new GenerateResult(attempt.getResult(), attempt.getFailedStage(), attempt.getErrorMessage(), reviewReason);
+        return Optional.of(
+                new GenerateResult(attempt.getResult(), attempt.getFailedStage(), attempt.getErrorMessage(), reviewReason));
     }
 
     // 승인·거절 응답에 반드시 있어야 하는 값 중 빠진 것
@@ -113,13 +120,18 @@ public class AdvertisementService {
         return missing;
     }
 
-    // agent 호출 자체가 실패한 경우 (연결 실패, 비정상 응답 등)
+    // agent 호출 자체가 실패한 경우 (연결 실패, 비정상 응답 등). 이미 닫힌 시도면 저장하지 않고 false
     @Transactional
-    public void failGenerate(Long attemptId, String errorMessage) {
-        AdAttempt attempt = findAttempt(attemptId);
+    public boolean failGenerate(Long attemptId, String errorMessage) {
+        AdAttempt attempt = findAttemptForClose(attemptId);
+        if (!attempt.isOpen()) {
+            logDiscarded(attempt, "생성 실패: " + errorMessage);
+            return false;
+        }
         attempt.fail(FailedStage.AGENT_CALL, errorMessage);
         attempt.getEvent().fail();
         log.warn("[생성 시도 실패] attemptId={}, message={}", attemptId, errorMessage);
+        return true;
     }
 
     // PUBLISH 시도를 기록하고 승인 콘텐츠를 반환
@@ -138,24 +150,36 @@ public class AdvertisementService {
         return new PublishTarget(attempt.getId(), content);
     }
 
-    // 발행 성공: 게시물 저장, 이벤트 PUBLISHED
+    // 발행 성공: 게시물 저장, 이벤트 PUBLISHED. 이미 닫힌 시도면 저장하지 않고 false
     @Transactional
-    public void completePublish(Long attemptId, AdContent content, String postUrl) {
-        AdAttempt attempt = findAttempt(attemptId);
+    public boolean completePublish(Long attemptId, AdContent content, String postUrl) {
+        AdAttempt attempt = findAttemptForClose(attemptId);
+        if (!attempt.isOpen()) {
+            // 게시는 됐으므로 추적할 수 있게 URL을 남김
+            log.warn("[닫힌 시도의 발행 결과 버림] eventId={}, attemptId={}, result={}, url={}",
+                    attempt.getEvent().getId(), attemptId, attempt.getResult(), postUrl);
+            return false;
+        }
         AdEvent event = attempt.getEvent();
         attempt.succeed();
         adPostRepository.save(AdPost.of(event, content, postUrl));
         event.publish();
         log.info("[발행 완료] eventId={}, attemptId={}, url={}", event.getId(), attemptId, postUrl);
+        return true;
     }
 
-    // 발행 실패: 이벤트 FAILED
+    // 발행 실패: 이벤트 FAILED. 이미 닫힌 시도면 저장하지 않고 false
     @Transactional
-    public void failPublish(Long attemptId, String errorMessage) {
-        AdAttempt attempt = findAttempt(attemptId);
+    public boolean failPublish(Long attemptId, String errorMessage) {
+        AdAttempt attempt = findAttemptForClose(attemptId);
+        if (!attempt.isOpen()) {
+            logDiscarded(attempt, "발행 실패: " + errorMessage);
+            return false;
+        }
         attempt.fail(FailedStage.PUBLISH, errorMessage);
         attempt.getEvent().fail();
         log.warn("[발행 실패] attemptId={}, message={}", attemptId, errorMessage);
+        return true;
     }
 
     private void saveGeneration(AdAttempt attempt, AgentGenerateResponseDto response) {
@@ -189,9 +213,16 @@ public class AdvertisementService {
                 .orElseThrow(() -> new IllegalStateException("광고 이벤트 없음: eventId=" + eventId));
     }
 
-    private AdAttempt findAttempt(Long attemptId) {
-        return adAttemptRepository.findById(attemptId)
+    // 시도를 닫기 전에 행을 잠가 조회. 결과는 시도가 아직 열려 있을 때만 저장
+    private AdAttempt findAttemptForClose(Long attemptId) {
+        return adAttemptRepository.findWithLockById(attemptId)
                 .orElseThrow(() -> new IllegalStateException("처리 시도 없음: attemptId=" + attemptId));
+    }
+
+    // 타임아웃 등으로 이미 닫힌 시도에 늦게 도착한 결과
+    private void logDiscarded(AdAttempt attempt, String discarded) {
+        log.info("[닫힌 시도의 결과 버림] eventId={}, attemptId={}, result={}, 버린 결과: {}",
+                attempt.getEvent().getId(), attempt.getId(), attempt.getResult(), discarded);
     }
 
     // 특정 상품의 광고 이력 전체 조회

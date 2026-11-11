@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.util.Optional;
 
 // 광고 처리 흐름: 생성(agent) -> 발행(Facebook)
 // 외부 호출은 트랜잭션 밖에서 하고, 앞뒤 상태는 AdvertisementService가 짧은 트랜잭션으로 저장
@@ -44,22 +45,23 @@ public class AdPipeline {
                 throw new IllegalStateException("agent 응답 없음");
             }
         } catch (Exception e) {
-            String message = describe(e);
-            advertisementService.failGenerate(request.attemptId(), message);
-            discordNotifier.notifyFailed(eventId, "AGENT_CALL", message);
+            failGenerate(eventId, request.attemptId(), describe(e));
             return;
         }
 
         // 응답 저장 실패(필수 값 누락, 길이 초과 등)는 agent 응답 문제로 보고 실패로 기록
-        AdvertisementService.GenerateResult result;
+        Optional<AdvertisementService.GenerateResult> completed;
         try {
-            result = advertisementService.completeGenerate(request.attemptId(), response);
+            completed = advertisementService.completeGenerate(request.attemptId(), response);
         } catch (Exception e) {
-            String message = "응답 저장 실패: " + describe(e);
-            advertisementService.failGenerate(request.attemptId(), message);
-            discordNotifier.notifyFailed(eventId, "AGENT_CALL", message);
+            failGenerate(eventId, request.attemptId(), "응답 저장 실패: " + describe(e));
             return;
         }
+        // 이미 닫힌 시도에 늦게 도착한 응답은 버림
+        if (completed.isEmpty()) {
+            return;
+        }
+        AdvertisementService.GenerateResult result = completed.get();
 
         switch (result.result()) {
             case SUCCESS -> publish(eventId, trigger);
@@ -84,18 +86,28 @@ public class AdPipeline {
         }
 
         // 게시 후 저장 실패는 게시글을 추적할 수 있도록 URL을 메시지에 남김
+        boolean saved;
         try {
-            advertisementService.completePublish(target.attemptId(), target.content(), postUrl);
+            saved = advertisementService.completePublish(target.attemptId(), target.content(), postUrl);
         } catch (Exception e) {
             failPublish(eventId, target.attemptId(), "게시 후 저장 실패 (url=" + postUrl + "): " + describe(e));
             return;
         }
-        discordNotifier.notifyPublished(eventId, target.content().title(), postUrl);
+        if (saved) {
+            discordNotifier.notifyPublished(eventId, target.content().title(), postUrl);
+        }
+    }
+
+    private void failGenerate(Long eventId, Long attemptId, String message) {
+        if (advertisementService.failGenerate(attemptId, message)) {
+            discordNotifier.notifyFailed(eventId, "AGENT_CALL", message);
+        }
     }
 
     private void failPublish(Long eventId, Long attemptId, String message) {
-        advertisementService.failPublish(attemptId, message);
-        discordNotifier.notifyFailed(eventId, "PUBLISH", message);
+        if (advertisementService.failPublish(attemptId, message)) {
+            discordNotifier.notifyFailed(eventId, "PUBLISH", message);
+        }
     }
 
     private static String describe(Exception e) {
