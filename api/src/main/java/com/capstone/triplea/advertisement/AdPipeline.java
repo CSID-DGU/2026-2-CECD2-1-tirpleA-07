@@ -29,7 +29,7 @@ public class AdPipeline {
     private final DiscordNotifier discordNotifier;
 
     // 생성 시도. 승인되면 같은 trigger로 발행까지 이어서 실행
-    // 시도를 시작할 수 없으면(이벤트가 PENDING이 아님, 진행 중인 시도 있음, 선점 충돌) 예외
+    // 시도를 시작할 수 없으면(이벤트가 PENDING이 아님, 진행 중인 시도 있음, 선점 충돌) AttemptStartRejectedException
     public void generate(Long eventId, AttemptTrigger trigger) {
         AgentGenerateRequestDto request = advertisementService.startGenerate(eventId, trigger);
 

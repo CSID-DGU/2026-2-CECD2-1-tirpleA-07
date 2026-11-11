@@ -1,6 +1,7 @@
 package com.capstone.triplea.advertisement.recovery;
 
 import com.capstone.triplea.advertisement.AdPipeline;
+import com.capstone.triplea.advertisement.AttemptStartRejectedException;
 import com.capstone.triplea.advertisement.AttemptTrigger;
 import com.capstone.triplea.advertisement.CloseResult;
 import com.capstone.triplea.advertisement.FailedStage;
@@ -108,6 +109,20 @@ class AdRecoverySchedulerTest {
         doThrow(new IllegalStateException("진행 중인 시도 있음")).when(adPipeline).generate(eq(1L), any());
 
         scheduler.run();
+
+        verify(adPipeline).generate(2L, AttemptTrigger.RECOVERY);
+    }
+
+    @Test
+    void 시작이_거부된_건은_실행한_건수로_세지_않는다() {
+        AdRecoveryScheduler limited = new AdRecoveryScheduler(recoveryService, adPipeline, discordNotifier,
+                new AdRecoveryProperties(true, Duration.ofMinutes(1), Duration.ofMinutes(5), 3, false, Duration.ofMinutes(5), 1));
+        when(recoveryService.findPendingEventIds()).thenReturn(List.of(1L, 2L));
+        decide(1L, action(NextAction.GENERATE));
+        decide(2L, action(NextAction.GENERATE));
+        doThrow(new AttemptStartRejectedException("진행 중인 시도 있음")).when(adPipeline).generate(eq(1L), any());
+
+        limited.run();
 
         verify(adPipeline).generate(2L, AttemptTrigger.RECOVERY);
     }

@@ -8,6 +8,7 @@ import com.capstone.triplea.advertisement.AdEventType;
 import com.capstone.triplea.advertisement.AdPostRepository;
 import com.capstone.triplea.advertisement.AdvertisementService;
 import com.capstone.triplea.advertisement.AttemptResult;
+import com.capstone.triplea.advertisement.AttemptStartRejectedException;
 import com.capstone.triplea.advertisement.AttemptTrigger;
 import com.capstone.triplea.advertisement.AttemptType;
 import com.capstone.triplea.advertisement.CloseResult;
@@ -166,7 +167,26 @@ class AdRetryRecoveryIntegrationTest {
         advertisementService.completeGenerate(request.attemptId(), approved(request.attemptId()));
 
         assertThatThrownBy(() -> advertisementService.startGenerate(eventId, AttemptTrigger.RECOVERY))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(AttemptStartRejectedException.class);
+    }
+
+    @Test
+    void 진행_중인_시도가_있으면_시작을_거부한다() {
+        advertisementService.startGenerate(eventId, AttemptTrigger.AUTO);
+
+        assertThatThrownBy(() -> advertisementService.startGenerate(eventId, AttemptTrigger.RECOVERY))
+                .isInstanceOf(AttemptStartRejectedException.class);
+    }
+
+    @Test
+    void PENDING이_아닌_이벤트는_시작을_거부한다() {
+        AgentGenerateRequestDto request = advertisementService.startGenerate(eventId, AttemptTrigger.AUTO);
+        advertisementService.completeGenerate(request.attemptId(), approved(request.attemptId()));
+        Long publishAttemptId = advertisementService.startPublish(eventId, AttemptTrigger.AUTO).attemptId();
+        advertisementService.failPublish(publishAttemptId, "timeout");
+
+        assertThatThrownBy(() -> advertisementService.startPublish(eventId, AttemptTrigger.RECOVERY))
+                .isInstanceOf(AttemptStartRejectedException.class);
     }
 
     @Test

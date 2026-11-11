@@ -1,6 +1,7 @@
 package com.capstone.triplea.advertisement.recovery;
 
 import com.capstone.triplea.advertisement.AdPipeline;
+import com.capstone.triplea.advertisement.AttemptStartRejectedException;
 import com.capstone.triplea.advertisement.AttemptTrigger;
 import com.capstone.triplea.advertisement.CloseResult;
 import com.capstone.triplea.advertisement.client.DiscordNotifier;
@@ -45,10 +46,9 @@ public class AdRecoveryScheduler {
                 if (recover(eventId, now)) {
                     executed++;
                 }
-            } catch (OptimisticLockingFailureException e) {
-                // 다른 쪽이 같은 이벤트를 먼저 선점함
-                executed++;
-                log.warn("[복구 건너뜀] eventId={}, {}", eventId, e.toString());
+            } catch (AttemptStartRejectedException | OptimisticLockingFailureException e) {
+                // 다른 쪽이 이미 처리했거나 처리 중 (오류 아님, 실행한 건수로 세지 않음)
+                log.info("[복구 건너뜀] eventId={}, {}", eventId, e.getMessage());
             } catch (Exception e) {
                 executed++;
                 log.error("[복구 실패] eventId={}", eventId, e);

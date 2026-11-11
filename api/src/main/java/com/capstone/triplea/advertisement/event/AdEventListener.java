@@ -1,6 +1,7 @@
 package com.capstone.triplea.advertisement.event;
 
 import com.capstone.triplea.advertisement.AdPipeline;
+import com.capstone.triplea.advertisement.AttemptStartRejectedException;
 import com.capstone.triplea.advertisement.AttemptTrigger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,9 +26,9 @@ public class AdEventListener {
         Long eventId = adEventCreated.eventId();
         try {
             adPipeline.generate(eventId, AttemptTrigger.AUTO);
-        } catch (OptimisticLockingFailureException e) {
-            // 다른 쪽이 같은 이벤트를 먼저 선점함
-            log.warn("[광고 처리 건너뜀] eventId={}, {}", eventId, e.toString());
+        } catch (AttemptStartRejectedException | OptimisticLockingFailureException e) {
+            // 다른 쪽이 이미 처리했거나 처리 중 (오류 아님)
+            log.info("[광고 처리 건너뜀] eventId={}, {}", eventId, e.getMessage());
         } catch (Exception e) {
             // 여기서 끝나지 못한 건은 PENDING으로 남아 복구 스케줄러가 이어서 처리
             log.error("[광고 처리 중단] eventId={}", eventId, e);

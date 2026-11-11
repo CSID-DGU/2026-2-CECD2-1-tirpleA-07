@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,7 +58,7 @@ public class AdvertisementService {
         // 승인 콘텐츠가 이미 있으면 다음 할 일은 발행 (늦게 실행된 작업이 다시 생성하는 것을 막음)
         if (adAttemptRepository.existsByEventIdAndAttemptTypeAndResult(
                 eventId, AttemptType.GENERATE, AttemptResult.SUCCESS)) {
-            throw new IllegalStateException("승인된 생성 시도가 이미 있음: eventId=" + eventId);
+            throw new AttemptStartRejectedException("승인된 생성 시도가 이미 있음: eventId=" + eventId);
         }
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.GENERATE, trigger));
         ProductSnapshot snapshot = event.getProductSnapshot();
@@ -222,12 +223,23 @@ public class AdvertisementService {
     }
 
     // 시도 시작 전 이벤트 선점: PENDING이고 진행 중인 시도가 없어야 하며, version 증가로 동시 시작을 막음
+    // 시작할 수 없는 경우는 오류와 구분되도록 AttemptStartRejectedException으로 알림
     private AdEvent occupyEvent(Long eventId) {
         AdEvent event = findEvent(eventId);
+        if (event.getStatus() != AdEventStatus.PENDING) {
+            throw new AttemptStartRejectedException(
+                    "이벤트가 PENDING이 아님: eventId=" + eventId + ", status=" + event.getStatus());
+        }
         if (adAttemptRepository.existsByEventIdAndResultIsNull(eventId)) {
-            throw new IllegalStateException("진행 중인 시도 있음: eventId=" + eventId);
+            throw new AttemptStartRejectedException("진행 중인 시도 있음: eventId=" + eventId);
         }
         event.touch();
+        // 선점 충돌을 커밋이 아니라 여기서 확인해 같은 예외로 알림
+        try {
+            adEventRepository.flush();
+        } catch (OptimisticLockingFailureException e) {
+            throw new AttemptStartRejectedException("다른 쪽이 먼저 선점함: eventId=" + eventId, e);
+        }
         return event;
     }
 
