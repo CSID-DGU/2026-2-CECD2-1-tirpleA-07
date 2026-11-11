@@ -30,8 +30,12 @@ class RecoveryPolicyTest {
     private long nextId = 1;
 
     private static RecoveryPolicy policy(boolean publishRetryEnabled) {
+        return policy(true, publishRetryEnabled);
+    }
+
+    private static RecoveryPolicy policy(boolean enabled, boolean publishRetryEnabled) {
         return new RecoveryPolicy(new AdRecoveryProperties(
-                true, Duration.ofMinutes(1), Duration.ofMinutes(5), 3, publishRetryEnabled, Duration.ofMinutes(5), 20));
+                enabled, Duration.ofMinutes(1), Duration.ofMinutes(5), 3, publishRetryEnabled, Duration.ofMinutes(5), 20));
     }
 
     // 종료 시각이 NOW보다 secondsAgo초 전인 닫힌 시도
@@ -111,6 +115,15 @@ class RecoveryPolicyTest {
         assertThat(policy.decide(NOW,
                 List.of(closed(GENERATE, AUTO, SUCCESS, 900), closed(PUBLISH, AUTO, SUCCESS, 800)), NOW))
                 .isEqualTo(NextAction.WAIT);
+    }
+
+    @Test
+    void 스케줄러가_꺼져_있으면_첫_실패로_소진된다() {
+        RecoveryPolicy disabled = policy(false, true);
+        List<AttemptView> attempts = List.of(closed(GENERATE, AUTO, FAILED, 0));
+
+        assertThat(disabled.isExhausted(attempts, GENERATE)).isTrue();
+        assertThat(disabled.decide(NOW, attempts, NOW)).isEqualTo(NextAction.FAIL_EVENT);
     }
 
     @Test

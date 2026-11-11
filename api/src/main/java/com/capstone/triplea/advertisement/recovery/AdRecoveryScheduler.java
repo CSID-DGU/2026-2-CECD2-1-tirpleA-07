@@ -10,6 +10,7 @@ import com.capstone.triplea.advertisement.recovery.AdRecoveryService.StaleClose;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -34,18 +35,31 @@ public class AdRecoveryScheduler {
     )
     public void run() {
         LocalDateTime now = LocalDateTime.now();
-        for (Long eventId : recoveryService.findPendingEventIds(properties.batchSize())) {
+        // 기다리는 건은 세지 않고, 실제로 실행한 건수로 한 주기의 상한을 둠 (기다리는 건이 뒤 건을 가리지 않게)
+        int executed = 0;
+        for (Long eventId : recoveryService.findPendingEventIds()) {
+            if (executed >= properties.batchSize()) {
+                break;
+            }
             try {
-                recover(eventId, now);
-            } catch (Exception e) {
-                // 시도 시작 거부(선점 충돌, 진행 중인 시도 있음)는 다른 쪽이 처리 중이라는 뜻
+                if (recover(eventId, now)) {
+                    executed++;
+                }
+            } catch (OptimisticLockingFailureException e) {
+                // 다른 쪽이 같은 이벤트를 먼저 선점함
+                executed++;
                 log.warn("[복구 건너뜀] eventId={}, {}", eventId, e.toString());
+            } catch (Exception e) {
+                executed++;
+                log.error("[복구 실패] eventId={}", eventId, e);
             }
         }
     }
 
-    void recover(Long eventId, LocalDateTime now) {
-        RecoveryDecision decision = recoveryService.decideNext(eventId, now);
+    // 실행한 것이 있으면 true (기다리기만 했으면 false)
+    boolean recover(Long eventId, LocalDateTime now) {
+        RecoveryDecision first = recoveryService.decideNext(eventId, now);
+        RecoveryDecision decision = first;
 
         // 오래 열려 있는 시도를 닫고, 재시도가 남았으면 같은 주기에 이어서 판단
         if (decision.action() == NextAction.CLOSE_TIMEOUT) {
@@ -56,7 +70,7 @@ public class AdRecoveryScheduler {
                 notifyFailed(eventId, closed.failure());
             }
             if (closed.result() != CloseResult.RETRY_PENDING) {
-                return;
+                return true;
             }
             decision = recoveryService.decideNext(eventId, now);
         }
@@ -72,8 +86,12 @@ public class AdRecoveryScheduler {
             }
             case FAIL_EVENT -> recoveryService.failExhaustedEvent(eventId)
                     .ifPresent(failure -> notifyFailed(eventId, failure));
-            default -> { }
+            default -> {
+                // 닫기만 하고 끝난 경우도 실행한 것으로 셈
+                return decision != first;
+            }
         }
+        return true;
     }
 
     private void notifyFailed(Long eventId, Failure failure) {

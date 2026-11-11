@@ -4,6 +4,7 @@ import com.capstone.triplea.advertisement.AdPipeline;
 import com.capstone.triplea.advertisement.AttemptTrigger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -24,9 +25,12 @@ public class AdEventListener {
         Long eventId = adEventCreated.eventId();
         try {
             adPipeline.generate(eventId, AttemptTrigger.AUTO);
+        } catch (OptimisticLockingFailureException e) {
+            // 다른 쪽이 같은 이벤트를 먼저 선점함
+            log.warn("[광고 처리 건너뜀] eventId={}, {}", eventId, e.toString());
         } catch (Exception e) {
-            // 여기서 끝나지 못한 건은 PENDING으로 남음
-            log.warn("[광고 처리 중단] eventId={}, {}", eventId, e.toString());
+            // 여기서 끝나지 못한 건은 PENDING으로 남아 복구 스케줄러가 이어서 처리
+            log.error("[광고 처리 중단] eventId={}", eventId, e);
         }
     }
 }

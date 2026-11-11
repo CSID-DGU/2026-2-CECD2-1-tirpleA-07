@@ -21,7 +21,6 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -56,9 +55,9 @@ class AdRecoverySchedulerTest {
         decide(2L, action(NextAction.PUBLISH));
         decide(3L, action(NextAction.WAIT));
 
-        scheduler.recover(1L, NOW);
-        scheduler.recover(2L, NOW);
-        scheduler.recover(3L, NOW);
+        assertThat(scheduler.recover(1L, NOW)).isTrue();
+        assertThat(scheduler.recover(2L, NOW)).isTrue();
+        assertThat(scheduler.recover(3L, NOW)).isFalse();
 
         verify(adPipeline).generate(1L, AttemptTrigger.RECOVERY);
         verify(adPipeline).publish(2L, AttemptTrigger.RECOVERY);
@@ -103,7 +102,7 @@ class AdRecoverySchedulerTest {
 
     @Test
     void 한_건의_예외가_다음_건_처리를_막지_않는다() {
-        when(recoveryService.findPendingEventIds(anyInt())).thenReturn(List.of(1L, 2L));
+        when(recoveryService.findPendingEventIds()).thenReturn(List.of(1L, 2L));
         decide(1L, action(NextAction.GENERATE));
         decide(2L, action(NextAction.GENERATE));
         doThrow(new IllegalStateException("진행 중인 시도 있음")).when(adPipeline).generate(eq(1L), any());
@@ -111,6 +110,24 @@ class AdRecoverySchedulerTest {
         scheduler.run();
 
         verify(adPipeline).generate(2L, AttemptTrigger.RECOVERY);
+    }
+
+    @Test
+    void 기다리는_건은_세지_않고_실행한_건수로_상한을_둔다() {
+        AdRecoveryScheduler limited = new AdRecoveryScheduler(recoveryService, adPipeline, discordNotifier,
+                new AdRecoveryProperties(true, Duration.ofMinutes(1), Duration.ofMinutes(5), 3, false, Duration.ofMinutes(5), 2));
+        when(recoveryService.findPendingEventIds()).thenReturn(List.of(1L, 2L, 3L, 4L, 5L));
+        decide(1L, action(NextAction.WAIT));
+        decide(2L, action(NextAction.WAIT));
+        decide(3L, action(NextAction.GENERATE));
+        decide(4L, action(NextAction.GENERATE));
+        decide(5L, action(NextAction.GENERATE));
+
+        limited.run();
+
+        verify(adPipeline).generate(3L, AttemptTrigger.RECOVERY);
+        verify(adPipeline).generate(4L, AttemptTrigger.RECOVERY);
+        verify(adPipeline, never()).generate(eq(5L), any());
     }
 
     // @Scheduled의 주기 문자열(기본값 1m)을 Spring이 해석할 수 있는지 확인

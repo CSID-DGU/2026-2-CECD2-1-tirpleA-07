@@ -73,8 +73,12 @@ public class RecoveryPolicy {
         return failed >= maxAttempts(type);
     }
 
-    // 게시 여부 확인 없이 다시 발행하면 중복 게시될 수 있어, 발행 재시도가 꺼져 있으면 1회만 허용
+    // 복구 스케줄러가 꺼져 있으면 다시 시도할 주체가 없으므로 1회만 허용 (첫 실패에서 이벤트 FAILED)
+    // 게시 여부 확인 없이 다시 발행하면 중복 게시될 수 있어, 발행 재시도가 꺼져 있어도 1회만 허용
     private int maxAttempts(AttemptType type) {
+        if (!properties.enabled()) {
+            return 1;
+        }
         if (type == AttemptType.PUBLISH && !properties.publishRetryEnabled()) {
             return 1;
         }

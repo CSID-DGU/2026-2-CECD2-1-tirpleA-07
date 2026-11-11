@@ -1,6 +1,5 @@
 package com.capstone.triplea.advertisement;
 
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,5 +13,5 @@ public interface AdEventRepository extends JpaRepository<AdEvent, Long> {
 
     // 상태별 이벤트 id (오래 처리되지 않은 순) - 복구 스케줄러의 처리 대상 조회
     @Query("select e.id from AdEvent e where e.status = :status order by e.updatedAt asc, e.id asc")
-    List<Long> findIdsByStatusOrderByUpdatedAtAsc(@Param("status") AdEventStatus status, Pageable pageable);
+    List<Long> findIdsByStatusOrderByUpdatedAtAsc(@Param("status") AdEventStatus status);
 }

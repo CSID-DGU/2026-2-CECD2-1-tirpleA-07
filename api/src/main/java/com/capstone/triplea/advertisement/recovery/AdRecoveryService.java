@@ -12,10 +12,10 @@ import com.capstone.triplea.advertisement.CloseResult;
 import com.capstone.triplea.advertisement.FailedStage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,9 +25,6 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class AdRecoveryService {
-
-    static final String GENERATE_TIMEOUT_MESSAGE = "5분 초과: 결과가 기록되지 않음 (서버 재시작 또는 응답 유실)";
-    static final String PUBLISH_TIMEOUT_MESSAGE = "5분 초과: 결과가 기록되지 않음 (게시됐을 수 있음, 게시 여부 확인 필요)";
 
     private final AdEventRepository adEventRepository;
     private final AdAttemptRepository adAttemptRepository;
@@ -52,8 +49,8 @@ public class AdRecoveryService {
 
     // 처리 대상 후보: PENDING 이벤트를 오래 처리되지 않은 순서로
     @Transactional(readOnly = true)
-    public List<Long> findPendingEventIds(int limit) {
-        return adEventRepository.findIdsByStatusOrderByUpdatedAtAsc(AdEventStatus.PENDING, PageRequest.of(0, limit));
+    public List<Long> findPendingEventIds() {
+        return adEventRepository.findIdsByStatusOrderByUpdatedAtAsc(AdEventStatus.PENDING);
     }
 
     // 이벤트의 다음 할 일을 시도 기록으로 판단 (PENDING이 아니면 WAIT)
@@ -79,12 +76,20 @@ public class AdRecoveryService {
         if (!attempt.isOpen() || attempt.getStartedAt().plus(properties.staleAfter()).isAfter(now)) {
             return new StaleClose(CloseResult.DISCARDED, null);
         }
+        // 기준 시간은 설정값(ad.recovery.stale-after)을 그대로 메시지에 남김
+        String exceeded = describe(properties.staleAfter()) + " 초과: 결과가 기록되지 않음 ";
         if (attempt.getAttemptType() == AttemptType.GENERATE) {
-            CloseResult result = advertisementService.failGenerate(attemptId, GENERATE_TIMEOUT_MESSAGE);
-            return new StaleClose(result, new Failure(FailedStage.AGENT_CALL, GENERATE_TIMEOUT_MESSAGE));
+            String message = exceeded + "(서버 재시작 또는 응답 유실)";
+            CloseResult result = advertisementService.failGenerate(attemptId, message);
+            return new StaleClose(result, new Failure(FailedStage.AGENT_CALL, message));
         }
-        CloseResult result = advertisementService.failPublish(attemptId, PUBLISH_TIMEOUT_MESSAGE);
-        return new StaleClose(result, new Failure(FailedStage.PUBLISH, PUBLISH_TIMEOUT_MESSAGE));
+        String message = exceeded + "(게시됐을 수 있음, 게시 여부 확인 필요)";
+        CloseResult result = advertisementService.failPublish(attemptId, message);
+        return new StaleClose(result, new Failure(FailedStage.PUBLISH, message));
+    }
+
+    private static String describe(Duration duration) {
+        return duration.toSecondsPart() == 0 ? duration.toMinutes() + "분" : duration.toSeconds() + "초";
     }
 
     // 자동 재시도를 모두 썼는데 PENDING으로 남은 이벤트를 FAILED로 바꿈

@@ -95,6 +95,8 @@ public class AdPipeline {
         try {
             saved = advertisementService.completePublish(target.attemptId(), target.content(), postUrl);
         } catch (Exception e) {
+            // 실패 기록까지 실패해도 게시글을 찾을 수 있도록 URL을 먼저 로그에 남김
+            log.error("[게시 후 저장 실패] eventId={}, attemptId={}, url={}", eventId, target.attemptId(), postUrl, e);
             failPublish(eventId, target.attemptId(), "게시 후 저장 실패 (url=" + postUrl + "): " + describe(e));
             return;
         }

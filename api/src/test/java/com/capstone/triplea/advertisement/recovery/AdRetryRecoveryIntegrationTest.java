@@ -175,7 +175,7 @@ class AdRetryRecoveryIntegrationTest {
 
         assertThat(recoveryService.decideNext(eventId, now).action()).isEqualTo(NextAction.WAIT);
         assertThat(recoveryService.decideNext(eventId, now.plusMinutes(6)).action()).isEqualTo(NextAction.GENERATE);
-        assertThat(recoveryService.findPendingEventIds(20)).containsExactly(eventId);
+        assertThat(recoveryService.findPendingEventIds()).containsExactly(eventId);
     }
 
     @Test
@@ -196,6 +196,7 @@ class AdRetryRecoveryIntegrationTest {
         AdRecoveryService.StaleClose closed = recoveryService.closeStaleAttempt(attemptId, later);
         assertThat(closed.result()).isEqualTo(CloseResult.RETRY_PENDING);
         assertThat(closed.failure().stage()).isEqualTo(FailedStage.AGENT_CALL);
+        assertThat(closed.failure().message()).startsWith("5분 초과");
         assertThat(recoveryService.decideNext(eventId, later).action()).isEqualTo(NextAction.GENERATE);
 
         // 닫힌 뒤에 도착한 승인 응답은 버림
@@ -215,7 +216,7 @@ class AdRetryRecoveryIntegrationTest {
         assertThat(closed.result()).isEqualTo(CloseResult.EVENT_FAILED);
         assertThat(closed.failure().stage()).isEqualTo(FailedStage.PUBLISH);
         assertThat(eventStatus()).isEqualTo(AdEventStatus.FAILED);
-        assertThat(recoveryService.findPendingEventIds(20)).isEmpty();
+        assertThat(recoveryService.findPendingEventIds()).isEmpty();
     }
 
     @Test
