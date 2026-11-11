@@ -46,9 +46,9 @@ public class AdvertisementService {
 
     // GENERATE 시도를 기록하고 agent 요청을 만든다
     @Transactional
-    public AgentGenerateRequestDto startGenerate(Long eventId) {
+    public AgentGenerateRequestDto startGenerate(Long eventId, AttemptTrigger trigger) {
         AdEvent event = occupyEvent(eventId);
-        AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.GENERATE, AttemptTrigger.AUTO));
+        AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.GENERATE, trigger));
         ProductSnapshot snapshot = event.getProductSnapshot();
         return new AgentGenerateRequestDto(
                 attempt.getId(),
@@ -124,7 +124,7 @@ public class AdvertisementService {
 
     // PUBLISH 시도를 기록하고 승인 콘텐츠를 반환
     @Transactional
-    public PublishTarget startPublish(Long eventId) {
+    public PublishTarget startPublish(Long eventId, AttemptTrigger trigger) {
         AdEvent event = occupyEvent(eventId);
         AdAttempt approved = adAttemptRepository
                 .findFirstByEventIdAndAttemptTypeAndResultOrderByStartedAtDescIdDesc(
@@ -134,7 +134,7 @@ public class AdvertisementService {
                 .orElseThrow(() -> new IllegalStateException("생성 결과 없음: attemptId=" + approved.getId()))
                 .getContent();
 
-        AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.PUBLISH, AttemptTrigger.AUTO));
+        AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.PUBLISH, trigger));
         return new PublishTarget(attempt.getId(), content);
     }
 
