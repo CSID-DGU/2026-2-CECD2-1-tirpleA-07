@@ -21,8 +21,11 @@ pipeline {
                         // PR 빌드: PR의 대상 브랜치(보통 main)와 비교
                         sh "git fetch --no-tags origin +refs/heads/${env.CHANGE_TARGET}:refs/remotes/origin/${env.CHANGE_TARGET}"
                         base = "origin/${env.CHANGE_TARGET}"
+                    } else if (env.BRANCH_NAME == 'main' && !env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
+                        // main에 성공한 빌드가 아직 없으면: 운영 폴더에 실제로 배포돼 있는 커밋과 비교
+                        base = sh(script: "git -C ${env.DEPLOY_DIR} rev-parse HEAD", returnStdout: true).trim()
                     } else {
-                        // 브랜치 빌드: 마지막으로 성공한 빌드와 비교 (첫 빌드면 직전 커밋)
+                        // 그 외: 마지막으로 성공한 빌드와 비교 (첫 빌드면 직전 커밋)
                         base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: 'HEAD~1'
                     }
                     sh "git diff --name-only ${base}...HEAD"
