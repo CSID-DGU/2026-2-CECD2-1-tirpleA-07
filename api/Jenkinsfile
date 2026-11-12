@@ -80,9 +80,19 @@ pipeline {
         stage('Deploy') {
             when { allOf { branch 'main'; environment name: 'API_CHANGED', value: 'true' } }
             steps {
-                dir(env.DEPLOY_DIR) {
-                    sh 'git pull --ff-only origin main'
-                    sh 'docker compose up -d --build --no-deps api'
+                // api와 agent가 같은 잠금을 공유 -> 동시에 배포하지 않음
+                lock('triplea-deploy') {
+                    dir(env.DEPLOY_DIR) {
+                        sh '''
+                            git fetch origin main
+                            if [ "$(git rev-parse HEAD)" != "$GIT_COMMIT" ] && git merge-base --is-ancestor "$GIT_COMMIT" HEAD; then
+                                echo "더 최신 커밋이 이미 배포되어 있어 이 빌드는 배포하지 않습니다."
+                                exit 1
+                            fi
+                            git merge --ff-only "$GIT_COMMIT"
+                            docker compose up -d --build --no-deps api
+                        '''
+                    }
                 }
             }
         }
