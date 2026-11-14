@@ -1,0 +1,7 @@
+[tool.ruff]
+target-version = "py311"   # Dockerfile의 Python 3.11 기준
+line-length = 120
+
+[tool.ruff.lint]
+# E/W: 코드 스타일, F: 안 쓰는 변수·import 같은 실수, I: import 정렬, B: 버그가 되기 쉬운 패턴
+select = ["E", "F", "W", "I", "B"]
