@@ -17,6 +17,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -34,7 +35,9 @@ public class AdvertisementService {
     private final RecoveryPolicy recoveryPolicy;
 
     // 발행할 콘텐츠와 PUBLISH 시도 id
-    public record PublishTarget(Long attemptId, AdContent content) {
+    // verifySince: 이 이벤트의 이전 PUBLISH 시도 중 가장 이른 시작 시각. 값이 있으면 게시 전에 그 시각 이후의 게시 여부를 확인해야 함
+    // (이전 시도에서 이미 게시됐을 수 있음). 첫 발행이면 null
+    public record PublishTarget(Long attemptId, AdContent content, LocalDateTime verifySince) {
     }
 
     // 생성 시도 결과 (알림에 필요한 실패 정보와 거절 사유 포함)
@@ -155,8 +158,15 @@ public class AdvertisementService {
                 .orElseThrow(() -> new IllegalStateException("생성 결과 없음: attemptId=" + approved.getId()))
                 .getContent();
 
+        // 새 시도를 저장하기 전에, 이전 PUBLISH 시도가 있었는지와 그중 가장 이른 시작 시각을 구함
+        LocalDateTime verifySince = adAttemptRepository.findByEventIdOrderByStartedAtAscIdAsc(eventId).stream()
+                .filter(previous -> previous.getAttemptType() == AttemptType.PUBLISH)
+                .map(AdAttempt::getStartedAt)
+                .findFirst()
+                .orElse(null);
+
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.PUBLISH, trigger));
-        return new PublishTarget(attempt.getId(), content);
+        return new PublishTarget(attempt.getId(), content, verifySince);
     }
 
     // 발행 성공: 게시물 저장, 이벤트 PUBLISHED. 이미 닫힌 시도면 저장하지 않고 false
