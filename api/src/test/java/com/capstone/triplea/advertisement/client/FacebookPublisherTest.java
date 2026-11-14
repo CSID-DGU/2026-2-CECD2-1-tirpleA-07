@@ -56,7 +56,7 @@ class FacebookPublisherTest {
                 post("111_1", "다른 광고", "2026-11-14T03:05:00+0000"),
                 post("111_2", MESSAGE, "2026-11-14T03:01:00+0000")));
 
-        assertThat(publisher.findPostUrl(SINCE, CONTENT)).contains("https://www.facebook.com/111/posts/2");
+        assertThat(publisher.findPostUrls(SINCE, CONTENT)).containsExactly("https://www.facebook.com/111/posts/2");
     }
 
     @Test
@@ -64,7 +64,7 @@ class FacebookPublisherTest {
         FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_2", "다낭 특가 \\r\\n4박 5일 일정\\n지금 예약하세요\\n#다낭 #특가\\n\\n", "2026-11-14T03:01:00+0000")));
 
-        assertThat(publisher.findPostUrl(SINCE, CONTENT)).contains("https://www.facebook.com/111/posts/2");
+        assertThat(publisher.findPostUrls(SINCE, CONTENT)).containsExactly("https://www.facebook.com/111/posts/2");
     }
 
     @Test
@@ -73,17 +73,18 @@ class FacebookPublisherTest {
                 post("111_1", "다낭 특가\\n4박 6일 일정\\n지금 예약하세요\\n#다낭 #특가", "2026-11-14T03:05:00+0000"),
                 post("111_3", null, "2026-11-14T03:02:00+0000")));
 
-        assertThat(publisher.findPostUrl(SINCE, CONTENT)).isEmpty();
-        assertThat(publisher(HttpStatus.OK, postList()).findPostUrl(SINCE, CONTENT)).isEmpty();
+        assertThat(publisher.findPostUrls(SINCE, CONTENT)).isEmpty();
+        assertThat(publisher(HttpStatus.OK, postList()).findPostUrls(SINCE, CONTENT)).isEmpty();
     }
 
     @Test
-    void 같은_메시지가_여러_건이면_가장_먼저_게시된_것을_쓴다() {
+    void 같은_메시지가_여러_건이면_먼저_게시된_순서로_모두_반환한다() {
         FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_9", MESSAGE, "2026-11-14T03:10:00+0000"),
                 post("111_5", MESSAGE, "2026-11-14T03:01:00+0000")));
 
-        assertThat(publisher.findPostUrl(SINCE, CONTENT)).contains("https://www.facebook.com/111/posts/5");
+        assertThat(publisher.findPostUrls(SINCE, CONTENT)).containsExactly(
+                "https://www.facebook.com/111/posts/5", "https://www.facebook.com/111/posts/9");
     }
 
     @Test
@@ -91,29 +92,29 @@ class FacebookPublisherTest {
         String body = "{\"data\":[" + post("111_1", "다른 광고", "2026-11-14T03:05:00+0000")
                 + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/published_posts?access_token=x&after=y\"}}";
 
-        assertThatThrownBy(() -> publisher(HttpStatus.OK, body).findPostUrl(SINCE, CONTENT))
+        assertThatThrownBy(() -> publisher(HttpStatus.OK, body).findPostUrls(SINCE, CONTENT))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void 일치하는_게시물이_있으면_다음_페이지가_있어도_URL을_반환한다() {
+    void 일치하는_게시물이_있어도_다음_페이지가_있으면_확인_불가다() {
         String body = "{\"data\":[" + post("111_2", MESSAGE, "2026-11-14T03:01:00+0000")
                 + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/published_posts?after=y\"}}";
 
-        assertThat(publisher(HttpStatus.OK, body).findPostUrl(SINCE, CONTENT))
-                .contains("https://www.facebook.com/111/posts/2");
+        assertThatThrownBy(() -> publisher(HttpStatus.OK, body).findPostUrls(SINCE, CONTENT))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void 응답에_data가_없으면_확인_불가다() {
-        assertThatThrownBy(() -> publisher(HttpStatus.OK, "{\"error\":{\"message\":\"x\"}}").findPostUrl(SINCE, CONTENT))
+        assertThatThrownBy(() -> publisher(HttpStatus.OK, "{\"error\":{\"message\":\"x\"}}").findPostUrls(SINCE, CONTENT))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void 오류_응답이면_확인_불가이고_예외_메시지에_토큰이_없다() {
         for (HttpStatus status : List.of(HttpStatus.FORBIDDEN, HttpStatus.INTERNAL_SERVER_ERROR)) {
-            assertThatThrownBy(() -> publisher(status, "{\"error\":{\"message\":\"denied\"}}").findPostUrl(SINCE, CONTENT))
+            assertThatThrownBy(() -> publisher(status, "{\"error\":{\"message\":\"denied\"}}").findPostUrls(SINCE, CONTENT))
                     .isInstanceOf(WebClientResponseException.class)
                     .hasMessageNotContaining(TOKEN);
         }
@@ -121,7 +122,7 @@ class FacebookPublisherTest {
 
     @Test
     void 토큰은_헤더로_보내고_조회_시작_시각은_1분_앞당긴다() {
-        publisher(HttpStatus.OK, postList()).findPostUrl(SINCE, CONTENT);
+        publisher(HttpStatus.OK, postList()).findPostUrls(SINCE, CONTENT);
 
         ClientRequest request = requests.get(0);
         long expectedSince = SINCE.minusMinutes(1).atZone(ZoneId.systemDefault()).toEpochSecond();

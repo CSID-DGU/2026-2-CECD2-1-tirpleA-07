@@ -10,6 +10,9 @@ public interface AdPostRepository extends JpaRepository<AdPost, Long> {
 
     Optional<AdPost> findByEventId(Long eventId);
 
+    // 게시글이 이미 어떤 이벤트에 연결돼 있는지 (게시 여부 확인 때 다른 이벤트의 게시물 제외)
+    boolean existsByAdUrl(String adUrl);
+
     // 특정 상품의 게시물 (최신순)
     @EntityGraph(attributePaths = "event")
     List<AdPost> findByEventProductIdOrderByCreatedAtDesc(Long productId);

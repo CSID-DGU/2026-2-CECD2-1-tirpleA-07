@@ -158,15 +158,23 @@ public class AdvertisementService {
                 .orElseThrow(() -> new IllegalStateException("생성 결과 없음: attemptId=" + approved.getId()))
                 .getContent();
 
-        // 새 시도를 저장하기 전에, 이전 PUBLISH 시도가 있었는지와 그중 가장 이른 시작 시각을 구함
-        LocalDateTime verifySince = adAttemptRepository.findByEventIdOrderByStartedAtAscIdAsc(eventId).stream()
-                .filter(previous -> previous.getAttemptType() == AttemptType.PUBLISH)
+        // 새 시도를 저장하기 전에, 이전 PUBLISH 시도가 있었으면 그중 가장 이른 시작 시각을 구함
+        LocalDateTime verifySince = adAttemptRepository
+                .findFirstByEventIdAndAttemptTypeOrderByStartedAtAscIdAsc(eventId, AttemptType.PUBLISH)
                 .map(AdAttempt::getStartedAt)
-                .findFirst()
                 .orElse(null);
 
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.PUBLISH, trigger));
         return new PublishTarget(attempt.getId(), content, verifySince);
+    }
+
+    // 같은 메시지의 게시물 후보 중 아직 어떤 이벤트에도 연결되지 않은 첫 번째를 고름
+    // 문구가 같은 다른 이벤트의 게시물을 이 이벤트의 것으로 가져오지 않기 위함 (게시물 하나는 이벤트 하나에만)
+    @Transactional(readOnly = true)
+    public Optional<String> findUnlinkedPostUrl(List<String> candidateUrls) {
+        return candidateUrls.stream()
+                .filter(url -> !adPostRepository.existsByAdUrl(url))
+                .findFirst();
     }
 
     // 발행 성공: 게시물 저장, 이벤트 PUBLISHED. 이미 닫힌 시도면 저장하지 않고 false

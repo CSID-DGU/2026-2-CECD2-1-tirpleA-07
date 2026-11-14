@@ -86,7 +86,9 @@ public class AdPipeline {
         if (target.verifySince() != null) {
             Optional<String> found;
             try {
-                found = facebookPublisher.findPostUrl(target.verifySince(), target.content());
+                // 같은 메시지의 게시물 중 다른 이벤트에 이미 연결된 것은 제외
+                found = advertisementService.findUnlinkedPostUrl(
+                        facebookPublisher.findPostUrls(target.verifySince(), target.content()));
             } catch (Exception e) {
                 // 확인할 수 없으면 게시하지 않음 (중복 게시 방지)
                 failPublish(eventId, target.attemptId(), "게시 여부 확인 불가: " + describe(e));

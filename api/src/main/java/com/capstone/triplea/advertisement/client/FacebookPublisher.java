@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 // Facebook 페이지 게시와 게시 여부 확인 (게시는 agent의 sns_adapter에서 이전)
@@ -70,11 +69,12 @@ public class FacebookPublisher {
         return toPostUrl(postId);
     }
 
-    // since 이후 페이지가 게시한 글(published_posts)에서 콘텐츠와 같은 메시지의 게시물을 찾아 게시글 URL을 반환
+    // since 이후 페이지가 게시한 글(published_posts)에서 콘텐츠와 같은 메시지의 게시물을 모두 찾아 게시글 URL을 반환
     // (/feed는 방문자 글까지 포함해 pages_read_engagement만으로는 읽을 수 없음)
-    // 있으면 URL, 없으면 빈 값. 확인할 수 없으면(조회 실패, 응답 이상, 읽지 못한 게시물이 남음) 예외
+    // 먼저 게시된 순서로 반환하고 없으면 빈 목록. 확인할 수 없으면(조회 실패, 응답 이상, 읽지 못한 게시물이 남음) 예외
+    // 문구가 같은 다른 이벤트의 게시물이 섞일 수 있으므로, 어느 것을 쓸지는 호출하는 쪽이 정함
     // 토큰은 헤더로 보내 요청 URL(예외 메시지에 포함됨)에 남지 않게 함
-    public Optional<String> findPostUrl(LocalDateTime since, AdContent content) {
+    public List<String> findPostUrls(LocalDateTime since, AdContent content) {
         long sinceEpoch = since.minus(SINCE_MARGIN).atZone(ZoneId.systemDefault()).toEpochSecond();
 
         JsonNode response = webClient.get()
@@ -100,21 +100,18 @@ public class FacebookPublisher {
             }
         }
 
-        if (!matches.isEmpty()) {
-            // 이미 중복 게시된 경우에는 가장 먼저 게시된 것을 사용 (created_time은 같은 형식의 UTC 문자열)
-            matches.sort(Comparator.comparing(post -> post.path("created_time").asText("")));
-            if (matches.size() > 1) {
-                log.warn("[게시 확인] 같은 메시지의 게시물이 {}건: {}", matches.size(),
-                        matches.stream().map(post -> post.get("id").asText()).collect(Collectors.joining(", ")));
-            }
-            return Optional.of(toPostUrl(matches.get(0).get("id").asText()));
-        }
-
-        // 다음 페이지는 읽지 않음 (조회 범위가 짧아 한 페이지를 넘을 일이 없음). 다 읽지 못했으면 없다고 단정하지 않음
+        // 다음 페이지는 읽지 않음 (조회 범위가 짧아 한 페이지를 넘을 일이 없음). 다 읽지 못했으면 결과를 단정하지 않음
         if (response.path("paging").hasNonNull("next")) {
             throw new IllegalStateException("게시물 조회 범위를 모두 확인하지 못함 (" + LOOKUP_LIMIT + "건 초과)");
         }
-        return Optional.empty();
+
+        // 먼저 게시된 순서 (created_time은 같은 형식의 UTC 문자열)
+        matches.sort(Comparator.comparing(post -> post.path("created_time").asText("")));
+        if (matches.size() > 1) {
+            log.warn("[게시 확인] 같은 메시지의 게시물이 {}건: {}", matches.size(),
+                    matches.stream().map(post -> post.get("id").asText()).collect(Collectors.joining(", ")));
+        }
+        return matches.stream().map(post -> toPostUrl(post.get("id").asText())).toList();
     }
 
     // 비교용 정규화. Facebook이 저장하면서 바꾸는 부분만 맞춤 (테스트 페이지에서 확인):

@@ -38,6 +38,7 @@ class AdPipelineTest {
     private static final LocalDateTime SINCE = LocalDateTime.of(2026, 11, 14, 12, 0);
     private static final String NEW_URL = "https://www.facebook.com/111/posts/9";
     private static final String FOUND_URL = "https://www.facebook.com/111/posts/2";
+    private static final String LINKED_URL = "https://www.facebook.com/111/posts/1";
 
     private final AdvertisementService service = mock(AdvertisementService.class);
     private final FacebookPublisher facebook = mock(FacebookPublisher.class);
@@ -84,7 +85,7 @@ class AdPipelineTest {
 
         pipeline().publish(EVENT_ID, AttemptTrigger.AUTO);
 
-        verify(facebook, never()).findPostUrl(any(), any());
+        verify(facebook, never()).findPostUrls(any(), any());
         verify(service).completePublish(PUBLISH_ATTEMPT_ID, CONTENT, NEW_URL);
         verify(discord).notifyPublished(EVENT_ID, "제목", NEW_URL);
     }
@@ -92,7 +93,8 @@ class AdPipelineTest {
     @Test
     void 이미_게시된_것을_확인하면_재발행하지_않고_그_게시물로_확정한다() {
         publishTarget(SINCE);
-        when(facebook.findPostUrl(SINCE, CONTENT)).thenReturn(Optional.of(FOUND_URL));
+        when(facebook.findPostUrls(SINCE, CONTENT)).thenReturn(List.of(LINKED_URL, FOUND_URL));
+        when(service.findUnlinkedPostUrl(List.of(LINKED_URL, FOUND_URL))).thenReturn(Optional.of(FOUND_URL));
         when(service.completePublish(PUBLISH_ATTEMPT_ID, CONTENT, FOUND_URL)).thenReturn(true);
 
         pipeline().publish(EVENT_ID, AttemptTrigger.RECOVERY);
@@ -105,7 +107,8 @@ class AdPipelineTest {
     @Test
     void 게시되지_않은_것을_확인하면_다시_게시한다() {
         publishTarget(SINCE);
-        when(facebook.findPostUrl(SINCE, CONTENT)).thenReturn(Optional.empty());
+        when(facebook.findPostUrls(SINCE, CONTENT)).thenReturn(List.of());
+        when(service.findUnlinkedPostUrl(List.of())).thenReturn(Optional.empty());
         when(facebook.publish(CONTENT)).thenReturn(NEW_URL);
         when(service.completePublish(PUBLISH_ATTEMPT_ID, CONTENT, NEW_URL)).thenReturn(true);
 
@@ -116,9 +119,23 @@ class AdPipelineTest {
     }
 
     @Test
+    void 같은_메시지의_게시물이_모두_다른_이벤트에_연결돼_있으면_다시_게시한다() {
+        publishTarget(SINCE);
+        when(facebook.findPostUrls(SINCE, CONTENT)).thenReturn(List.of(LINKED_URL));
+        when(service.findUnlinkedPostUrl(List.of(LINKED_URL))).thenReturn(Optional.empty());
+        when(facebook.publish(CONTENT)).thenReturn(NEW_URL);
+        when(service.completePublish(PUBLISH_ATTEMPT_ID, CONTENT, NEW_URL)).thenReturn(true);
+
+        pipeline().publish(EVENT_ID, AttemptTrigger.RECOVERY);
+
+        verify(facebook).publish(CONTENT);
+        verify(service).completePublish(PUBLISH_ATTEMPT_ID, CONTENT, NEW_URL);
+    }
+
+    @Test
     void 게시_여부를_확인할_수_없으면_게시하지_않고_실패로_기록한다() {
         publishTarget(SINCE);
-        when(facebook.findPostUrl(SINCE, CONTENT)).thenThrow(new IllegalStateException("403 Forbidden"));
+        when(facebook.findPostUrls(SINCE, CONTENT)).thenThrow(new IllegalStateException("403 Forbidden"));
         when(service.failPublish(eq(PUBLISH_ATTEMPT_ID), anyString())).thenReturn(CloseResult.RETRY_PENDING);
 
         pipeline().publish(EVENT_ID, AttemptTrigger.RECOVERY);

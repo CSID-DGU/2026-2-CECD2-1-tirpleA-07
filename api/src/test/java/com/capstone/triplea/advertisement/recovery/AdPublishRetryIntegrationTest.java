@@ -145,4 +145,17 @@ class AdPublishRetryIntegrationTest {
         assertThat(saved).isTrue();
         assertThat(eventStatus()).isEqualTo(AdEventStatus.PUBLISHED);
     }
+
+    @Test
+    void 이미_이벤트에_연결된_게시물은_후보에서_제외한다() {
+        String linked = "https://www.facebook.com/111/posts/1";
+        String unlinked = "https://www.facebook.com/111/posts/2";
+        PublishTarget target = advertisementService.startPublish(eventId, AttemptTrigger.AUTO);
+        advertisementService.completePublish(target.attemptId(), target.content(), linked);
+        em.flush();
+
+        assertThat(advertisementService.findUnlinkedPostUrl(List.of(linked, unlinked))).contains(unlinked);
+        assertThat(advertisementService.findUnlinkedPostUrl(List.of(linked))).isEmpty();
+        assertThat(advertisementService.findUnlinkedPostUrl(List.of())).isEmpty();
+    }
 }
