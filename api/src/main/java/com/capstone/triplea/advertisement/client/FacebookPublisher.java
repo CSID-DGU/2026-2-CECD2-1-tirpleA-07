@@ -70,14 +70,15 @@ public class FacebookPublisher {
         return toPostUrl(postId);
     }
 
-    // since 이후 페이지 피드에서 콘텐츠와 같은 메시지의 게시물을 찾아 게시글 URL을 반환
+    // since 이후 페이지가 게시한 글(published_posts)에서 콘텐츠와 같은 메시지의 게시물을 찾아 게시글 URL을 반환
+    // (/feed는 방문자 글까지 포함해 pages_read_engagement만으로는 읽을 수 없음)
     // 있으면 URL, 없으면 빈 값. 확인할 수 없으면(조회 실패, 응답 이상, 읽지 못한 게시물이 남음) 예외
     // 토큰은 헤더로 보내 요청 URL(예외 메시지에 포함됨)에 남지 않게 함
     public Optional<String> findPostUrl(LocalDateTime since, AdContent content) {
         long sinceEpoch = since.minus(SINCE_MARGIN).atZone(ZoneId.systemDefault()).toEpochSecond();
 
         JsonNode response = webClient.get()
-                .uri("/{pageId}/feed?since={since}&fields=id,message,created_time&limit={limit}",
+                .uri("/{pageId}/published_posts?since={since}&fields=id,message,created_time&limit={limit}",
                         pageId, sinceEpoch, FEED_LIMIT)
                 .headers(headers -> headers.setBearerAuth(token))
                 .retrieve()
@@ -86,7 +87,7 @@ public class FacebookPublisher {
 
         JsonNode data = response == null ? null : response.get("data");
         if (data == null || !data.isArray()) {
-            throw new IllegalStateException("Facebook 피드 응답에 data 없음");
+            throw new IllegalStateException("Facebook 게시물 조회 응답에 data 없음");
         }
 
         // 게시할 때와 같은 방식으로 만든 메시지와 정규화 후 완전 일치하는 게시물만 같은 것으로 봄
@@ -109,18 +110,22 @@ public class FacebookPublisher {
             return Optional.of(toPostUrl(matches.get(0).get("id").asText()));
         }
 
-        // 다음 페이지 URL에는 토큰이 들어 있어 따라가지 않음. 다 읽지 못했으면 없다고 단정하지 않음
+        // 다음 페이지는 읽지 않음 (조회 범위가 짧아 한 페이지를 넘을 일이 없음). 다 읽지 못했으면 없다고 단정하지 않음
         if (response.path("paging").hasNonNull("next")) {
-            throw new IllegalStateException("피드 조회 범위를 모두 확인하지 못함 (게시물 " + FEED_LIMIT + "건 초과)");
+            throw new IllegalStateException("게시물 조회 범위를 모두 확인하지 못함 (" + FEED_LIMIT + "건 초과)");
         }
         return Optional.empty();
     }
 
-    // 비교용 정규화: 줄바꿈 통일, 각 줄 끝 공백 제거, 전체 앞뒤 공백·빈 줄 제거
+    // 비교용 정규화. Facebook이 저장하면서 바꾸는 부분만 맞춤 (테스트 페이지에서 확인):
+    // 끝의 줄바꿈 제거, 연속된 빈 줄을 한 줄로 축소, 탭을 공백으로 변경
+    // 줄바꿈 통일 -> 탭을 공백으로 -> 각 줄 끝 공백 제거 -> 연속된 빈 줄 축소 -> 전체 앞뒤 공백·빈 줄 제거
     static String normalize(String message) {
-        return Arrays.stream(message.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1))
+        String unified = message.replace("\r\n", "\n").replace('\r', '\n').replace('\t', ' ');
+        return Arrays.stream(unified.split("\n", -1))
                 .map(String::stripTrailing)
                 .collect(Collectors.joining("\n"))
+                .replaceAll("\n{3,}", "\n\n")
                 .strip();
     }
 

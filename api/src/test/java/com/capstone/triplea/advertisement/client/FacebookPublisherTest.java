@@ -126,7 +126,7 @@ class FacebookPublisherTest {
         ClientRequest request = requests.get(0);
         long expectedSince = SINCE.minusMinutes(1).atZone(ZoneId.systemDefault()).toEpochSecond();
         String url = request.url().toString();
-        assertThat(url).startsWith("https://graph.example.com/v1/111/feed?")
+        assertThat(url).startsWith("https://graph.example.com/v1/111/published_posts?")
                 .contains("since=" + expectedSince)
                 .contains("limit=100")
                 .contains("fields=id,message,created_time")
@@ -140,5 +140,18 @@ class FacebookPublisherTest {
         assertThat(FacebookPublisher.normalize("\n제목  \r\n본문\t\r끝\n\n")).isEqualTo("제목\n본문\n끝");
         assertThat(FacebookPublisher.normalize("제목\n\n본문")).isEqualTo("제목\n\n본문");
         assertThat(FacebookPublisher.normalize("제목\n 본문")).isNotEqualTo(FacebookPublisher.normalize("제목\n본문"));
+        assertThat(FacebookPublisher.normalize("제목  본문")).isNotEqualTo(FacebookPublisher.normalize("제목 본문"));
+    }
+
+    // 테스트 페이지에 실제로 게시한 뒤 조회한 값 (2026-11-14): 끝 줄바꿈 제거, 빈 줄 두 개 -> 한 개, 탭 -> 공백
+    @Test
+    void Facebook이_저장하면서_바꾼_메시지도_같은_메시지로_본다() {
+        String sent = "두바이 5일   \n첫 줄 끝에 공백이 있음  \n\n\n빈 줄 두 개 뒤의 문장\tCTA 탭 포함 \n#두바이  #사막";
+        String stored = "두바이 5일   \n첫 줄 끝에 공백이 있음  \n\n빈 줄 두 개 뒤의 문장 CTA 탭 포함 \n#두바이  #사막";
+        assertThat(FacebookPublisher.normalize(stored)).isEqualTo(FacebookPublisher.normalize(sent));
+
+        String sentWithoutHashtags = "그리스 산토리니 7일\n에게해의 석양을 만나 보세요.\n지금 예약하기\n";
+        String storedWithoutHashtags = "그리스 산토리니 7일\n에게해의 석양을 만나 보세요.\n지금 예약하기";
+        assertThat(FacebookPublisher.normalize(storedWithoutHashtags)).isEqualTo(FacebookPublisher.normalize(sentWithoutHashtags));
     }
 }
