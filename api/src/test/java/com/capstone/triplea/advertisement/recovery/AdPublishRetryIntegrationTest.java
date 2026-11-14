@@ -134,7 +134,7 @@ class AdPublishRetryIntegrationTest {
     }
 
     @Test
-    void 피드에서_찾은_게시물로_발행을_확정한다() {
+    void 조회로_찾은_게시물로_발행을_확정한다() {
         PublishTarget first = advertisementService.startPublish(eventId, AttemptTrigger.AUTO);
         advertisementService.failPublish(first.attemptId(), "timeout");
         PublishTarget second = advertisementService.startPublish(eventId, AttemptTrigger.RECOVERY);

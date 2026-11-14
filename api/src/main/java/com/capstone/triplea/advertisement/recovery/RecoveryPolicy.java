@@ -42,7 +42,7 @@ public class RecoveryPolicy {
             if (latest.type() == AttemptType.GENERATE) {
                 return NextAction.GENERATE;
             }
-            // 발행 실패는 게시됐을 수 있으므로 피드에 반영될 시간을 두고 다시 시도
+            // 발행 실패는 게시됐을 수 있으므로 게시물 조회에 반영될 시간을 두고 다시 시도
             return isDue(latest.finishedAt(), properties.publishCheckDelay(), now) ? NextAction.PUBLISH : NextAction.WAIT;
         }
 

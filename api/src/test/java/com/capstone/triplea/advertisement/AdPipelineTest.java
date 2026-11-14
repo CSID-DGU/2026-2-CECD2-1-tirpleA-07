@@ -77,7 +77,7 @@ class AdPipelineTest {
     // ---- 발행 ----
 
     @Test
-    void 첫_발행은_피드를_조회하지_않고_게시한다() {
+    void 첫_발행은_게시_여부를_조회하지_않고_게시한다() {
         publishTarget(null);
         when(facebook.publish(CONTENT)).thenReturn(NEW_URL);
         when(service.completePublish(PUBLISH_ATTEMPT_ID, CONTENT, NEW_URL)).thenReturn(true);

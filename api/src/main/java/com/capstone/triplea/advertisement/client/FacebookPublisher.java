@@ -29,11 +29,11 @@ public class FacebookPublisher {
     // Facebook 응답 대기 시간. 넘으면 예외 (게시됐을 수 있으므로 재발행 전 확인 필요)
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
-    // 피드 조회 시작 시각을 앞당기는 여유 (api 서버와 Facebook의 시계 차이)
+    // 게시물 조회 시작 시각을 앞당기는 여유 (api 서버와 Facebook의 시계 차이)
     private static final Duration SINCE_MARGIN = Duration.ofMinutes(1);
 
-    // 피드에서 한 번에 읽는 게시물 수. 다음 페이지는 읽지 않음
-    private static final int FEED_LIMIT = 100;
+    // 게시 여부 확인 때 한 번에 읽는 게시물 수. 다음 페이지는 읽지 않음
+    private static final int LOOKUP_LIMIT = 100;
 
     private final WebClient webClient;
     private final String pageId;
@@ -79,7 +79,7 @@ public class FacebookPublisher {
 
         JsonNode response = webClient.get()
                 .uri("/{pageId}/published_posts?since={since}&fields=id,message,created_time&limit={limit}",
-                        pageId, sinceEpoch, FEED_LIMIT)
+                        pageId, sinceEpoch, LOOKUP_LIMIT)
                 .headers(headers -> headers.setBearerAuth(token))
                 .retrieve()
                 .bodyToMono(JsonNode.class)
@@ -112,7 +112,7 @@ public class FacebookPublisher {
 
         // 다음 페이지는 읽지 않음 (조회 범위가 짧아 한 페이지를 넘을 일이 없음). 다 읽지 못했으면 없다고 단정하지 않음
         if (response.path("paging").hasNonNull("next")) {
-            throw new IllegalStateException("게시물 조회 범위를 모두 확인하지 못함 (" + FEED_LIMIT + "건 초과)");
+            throw new IllegalStateException("게시물 조회 범위를 모두 확인하지 못함 (" + LOOKUP_LIMIT + "건 초과)");
         }
         return Optional.empty();
     }

@@ -78,7 +78,7 @@ public class AdPipeline {
     }
 
     // 발행 시도 (승인된 생성 결과가 있어야 함)
-    // 이전 발행 시도가 있었으면 이미 게시됐을 수 있으므로, 게시 전에 페이지 피드에서 게시 여부를 확인
+    // 이전 발행 시도가 있었으면 이미 게시됐을 수 있으므로, 게시 전에 페이지에 게시된 글을 조회해 게시 여부를 확인
     public void publish(Long eventId, AttemptTrigger trigger) {
         AdvertisementService.PublishTarget target = advertisementService.startPublish(eventId, trigger);
 

@@ -46,13 +46,13 @@ class FacebookPublisherTest {
         return "{\"id\":\"" + id + "\"," + messageField + "\"created_time\":\"" + createdTime + "\"}";
     }
 
-    private static String feed(String... posts) {
+    private static String postList(String... posts) {
         return "{\"data\":[" + String.join(",", posts) + "]}";
     }
 
     @Test
     void 같은_메시지의_게시물이_있으면_URL을_반환한다() {
-        FacebookPublisher publisher = publisher(HttpStatus.OK, feed(
+        FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_1", "다른 광고", "2026-11-14T03:05:00+0000"),
                 post("111_2", MESSAGE, "2026-11-14T03:01:00+0000")));
 
@@ -61,7 +61,7 @@ class FacebookPublisherTest {
 
     @Test
     void 줄_끝_공백과_끝의_빈_줄_차이는_같은_메시지로_본다() {
-        FacebookPublisher publisher = publisher(HttpStatus.OK, feed(
+        FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_2", "다낭 특가 \\r\\n4박 5일 일정\\n지금 예약하세요\\n#다낭 #특가\\n\\n", "2026-11-14T03:01:00+0000")));
 
         assertThat(publisher.findPostUrl(SINCE, CONTENT)).contains("https://www.facebook.com/111/posts/2");
@@ -69,17 +69,17 @@ class FacebookPublisherTest {
 
     @Test
     void 같은_메시지가_없으면_빈_값을_반환한다() {
-        FacebookPublisher publisher = publisher(HttpStatus.OK, feed(
+        FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_1", "다낭 특가\\n4박 6일 일정\\n지금 예약하세요\\n#다낭 #특가", "2026-11-14T03:05:00+0000"),
                 post("111_3", null, "2026-11-14T03:02:00+0000")));
 
         assertThat(publisher.findPostUrl(SINCE, CONTENT)).isEmpty();
-        assertThat(publisher(HttpStatus.OK, feed()).findPostUrl(SINCE, CONTENT)).isEmpty();
+        assertThat(publisher(HttpStatus.OK, postList()).findPostUrl(SINCE, CONTENT)).isEmpty();
     }
 
     @Test
     void 같은_메시지가_여러_건이면_가장_먼저_게시된_것을_쓴다() {
-        FacebookPublisher publisher = publisher(HttpStatus.OK, feed(
+        FacebookPublisher publisher = publisher(HttpStatus.OK, postList(
                 post("111_9", MESSAGE, "2026-11-14T03:10:00+0000"),
                 post("111_5", MESSAGE, "2026-11-14T03:01:00+0000")));
 
@@ -89,7 +89,7 @@ class FacebookPublisherTest {
     @Test
     void 일치하는_게시물_없이_다음_페이지가_있으면_확인_불가다() {
         String body = "{\"data\":[" + post("111_1", "다른 광고", "2026-11-14T03:05:00+0000")
-                + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/feed?access_token=x&after=y\"}}";
+                + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/published_posts?access_token=x&after=y\"}}";
 
         assertThatThrownBy(() -> publisher(HttpStatus.OK, body).findPostUrl(SINCE, CONTENT))
                 .isInstanceOf(IllegalStateException.class);
@@ -98,7 +98,7 @@ class FacebookPublisherTest {
     @Test
     void 일치하는_게시물이_있으면_다음_페이지가_있어도_URL을_반환한다() {
         String body = "{\"data\":[" + post("111_2", MESSAGE, "2026-11-14T03:01:00+0000")
-                + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/feed?after=y\"}}";
+                + "],\"paging\":{\"next\":\"https://graph.example.com/v1/111/published_posts?after=y\"}}";
 
         assertThat(publisher(HttpStatus.OK, body).findPostUrl(SINCE, CONTENT))
                 .contains("https://www.facebook.com/111/posts/2");
@@ -121,7 +121,7 @@ class FacebookPublisherTest {
 
     @Test
     void 토큰은_헤더로_보내고_조회_시작_시각은_1분_앞당긴다() {
-        publisher(HttpStatus.OK, feed()).findPostUrl(SINCE, CONTENT);
+        publisher(HttpStatus.OK, postList()).findPostUrl(SINCE, CONTENT);
 
         ClientRequest request = requests.get(0);
         long expectedSince = SINCE.minusMinutes(1).atZone(ZoneId.systemDefault()).toEpochSecond();
