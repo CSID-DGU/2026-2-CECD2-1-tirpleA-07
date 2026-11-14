@@ -114,9 +114,10 @@ public class FacebookPublisher {
         return matches.stream().map(post -> toPostUrl(post.get("id").asText())).toList();
     }
 
-    // 비교용 정규화. Facebook이 저장하면서 바꾸는 부분만 맞춤 (테스트 페이지에서 확인):
-    // 끝의 줄바꿈 제거, 연속된 빈 줄을 한 줄로 축소, 탭을 공백으로 변경
-    // 줄바꿈 통일 -> 탭을 공백으로 -> 각 줄 끝 공백 제거 -> 연속된 빈 줄 축소 -> 전체 앞뒤 공백·빈 줄 제거
+    // 비교용 정규화. 보낸 메시지와 Facebook에 저장된 메시지를 같은 형태로 맞춤
+    // - Facebook이 저장하면서 바꾸는 것 (테스트 페이지에서 확인): 끝의 줄바꿈 제거, 연속된 빈 줄을 한 줄로 축소, 탭을 공백으로 변경
+    // - 그 밖에 내용과 무관한 차이도 함께 무시: 줄바꿈 종류(\r\n, \r), 각 줄 끝의 공백, 전체 앞뒤 공백
+    // 처리 순서: 줄바꿈 통일 -> 탭을 공백으로 -> 각 줄 끝 공백 제거 -> 연속된 빈 줄 축소 -> 전체 앞뒤 공백·빈 줄 제거
     static String normalize(String message) {
         String unified = message.replace("\r\n", "\n").replace('\r', '\n').replace('\t', ' ');
         return Arrays.stream(unified.split("\n", -1))
