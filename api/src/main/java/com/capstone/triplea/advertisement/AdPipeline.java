@@ -78,16 +78,37 @@ public class AdPipeline {
     }
 
     // 발행 시도 (승인된 생성 결과가 있어야 함)
+    // 이전 발행 시도가 있었으면 이미 게시됐을 수 있으므로, 게시 전에 페이지에 게시된 글을 조회해 게시 여부를 확인
     public void publish(Long eventId, AttemptTrigger trigger) {
         AdvertisementService.PublishTarget target = advertisementService.startPublish(eventId, trigger);
 
-        // 발행 단계의 실패는 모두 FAILED로 기록 (게시됐을 수 있으므로 재발행 전 게시 여부 확인 필요)
-        String postUrl;
-        try {
-            postUrl = facebookPublisher.publish(target.content());
-        } catch (Exception e) {
-            failPublish(eventId, target.attemptId(), describe(e));
-            return;
+        String postUrl = null;
+        if (target.verifySince() != null) {
+            Optional<String> found;
+            try {
+                // 같은 메시지의 게시물 중 다른 이벤트에 이미 연결된 것은 제외
+                found = advertisementService.findUnlinkedPostUrl(
+                        facebookPublisher.findPostUrls(target.verifySince(), target.content()));
+            } catch (Exception e) {
+                // 확인할 수 없으면 게시하지 않음 (중복 게시 방지)
+                failPublish(eventId, target.attemptId(), "게시 여부 확인 불가: " + describe(e));
+                return;
+            }
+            if (found.isPresent()) {
+                postUrl = found.get();
+                log.info("[게시 확인] eventId={}, attemptId={}, url={} (이미 게시됨, 재발행 안 함)",
+                        eventId, target.attemptId(), postUrl);
+            }
+        }
+
+        // 발행 단계의 실패는 모두 FAILED로 기록 (게시됐을 수 있으므로 다음 시도에서 게시 여부 확인)
+        if (postUrl == null) {
+            try {
+                postUrl = facebookPublisher.publish(target.content());
+            } catch (Exception e) {
+                failPublish(eventId, target.attemptId(), describe(e));
+                return;
+            }
         }
 
         // 게시 후 저장 실패는 게시글을 추적할 수 있도록 URL을 메시지에 남김

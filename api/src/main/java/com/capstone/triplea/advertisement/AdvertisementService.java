@@ -17,6 +17,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -34,7 +35,9 @@ public class AdvertisementService {
     private final RecoveryPolicy recoveryPolicy;
 
     // 발행할 콘텐츠와 PUBLISH 시도 id
-    public record PublishTarget(Long attemptId, AdContent content) {
+    // verifySince: 이 이벤트의 이전 PUBLISH 시도 중 가장 이른 시작 시각. 값이 있으면 게시 전에 그 시각 이후의 게시 여부를 확인해야 함
+    // (이전 시도에서 이미 게시됐을 수 있음). 첫 발행이면 null
+    public record PublishTarget(Long attemptId, AdContent content, LocalDateTime verifySince) {
     }
 
     // 생성 시도 결과 (알림에 필요한 실패 정보와 거절 사유 포함)
@@ -155,8 +158,23 @@ public class AdvertisementService {
                 .orElseThrow(() -> new IllegalStateException("생성 결과 없음: attemptId=" + approved.getId()))
                 .getContent();
 
+        // 새 시도를 저장하기 전에, 이전 PUBLISH 시도가 있었으면 그중 가장 이른 시작 시각을 구함
+        LocalDateTime verifySince = adAttemptRepository
+                .findFirstByEventIdAndAttemptTypeOrderByStartedAtAscIdAsc(eventId, AttemptType.PUBLISH)
+                .map(AdAttempt::getStartedAt)
+                .orElse(null);
+
         AdAttempt attempt = adAttemptRepository.save(AdAttempt.start(event, AttemptType.PUBLISH, trigger));
-        return new PublishTarget(attempt.getId(), content);
+        return new PublishTarget(attempt.getId(), content, verifySince);
+    }
+
+    // 같은 메시지의 게시물 후보 중 아직 어떤 이벤트에도 연결되지 않은 첫 번째를 고름
+    // 문구가 같은 다른 이벤트의 게시물을 이 이벤트의 것으로 가져오지 않기 위함 (게시물 하나는 이벤트 하나에만)
+    @Transactional(readOnly = true)
+    public Optional<String> findUnlinkedPostUrl(List<String> candidateUrls) {
+        return candidateUrls.stream()
+                .filter(url -> !adPostRepository.existsByAdUrl(url))
+                .findFirst();
     }
 
     // 발행 성공: 게시물 저장, 이벤트 PUBLISHED. 이미 닫힌 시도면 저장하지 않고 false

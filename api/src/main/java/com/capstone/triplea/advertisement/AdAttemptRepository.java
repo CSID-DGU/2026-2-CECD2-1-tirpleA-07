@@ -20,6 +20,9 @@ public interface AdAttemptRepository extends JpaRepository<AdAttempt, Long> {
     // 이벤트의 최신 시도 (종류별)
     Optional<AdAttempt> findFirstByEventIdAndAttemptTypeOrderByStartedAtDescIdDesc(Long eventId, AttemptType attemptType);
 
+    // 이벤트의 가장 이른 시도 (종류별) - 첫 PUBLISH 시도 시각 조회
+    Optional<AdAttempt> findFirstByEventIdAndAttemptTypeOrderByStartedAtAscIdAsc(Long eventId, AttemptType attemptType);
+
     // 이벤트의 최신 시도 (종류·결과별) - 승인된 GENERATE 시도 조회 등
     Optional<AdAttempt> findFirstByEventIdAndAttemptTypeAndResultOrderByStartedAtDescIdDesc(
             Long eventId, AttemptType attemptType, AttemptResult result);
