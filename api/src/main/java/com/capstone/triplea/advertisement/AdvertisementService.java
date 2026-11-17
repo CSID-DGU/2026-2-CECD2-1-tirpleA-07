@@ -168,6 +168,13 @@ public class AdvertisementService {
         return new PublishTarget(attempt.getId(), content, verifySince);
     }
 
+    // 시도가 아직 열려 있는지 (외부 호출 직전 확인)
+    // 실행이 늦어지는 사이 복구 스케줄러가 타임아웃으로 닫았으면, 그 시도로 외부 호출을 하지 않기 위함
+    @Transactional(readOnly = true)
+    public boolean isAttemptOpen(Long attemptId) {
+        return adAttemptRepository.findById(attemptId).map(AdAttempt::isOpen).orElse(false);
+    }
+
     // 같은 메시지의 게시물 후보 중 아직 어떤 이벤트에도 연결되지 않은 첫 번째를 고름
     // 문구가 같은 다른 이벤트의 게시물을 이 이벤트의 것으로 가져오지 않기 위함 (게시물 하나는 이벤트 하나에만)
     @Transactional(readOnly = true)

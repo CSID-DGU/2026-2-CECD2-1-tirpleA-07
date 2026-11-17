@@ -6,6 +6,7 @@ import com.capstone.triplea.advertisement.client.DiscordNotifier;
 import com.capstone.triplea.advertisement.client.FacebookPublisher;
 import com.capstone.triplea.advertisement.dto.AgentGenerateRequestDto;
 import com.capstone.triplea.advertisement.value.AdContent;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -57,6 +58,11 @@ class AdPipelineTest {
 
     private AdPipeline pipeline() {
         return pipeline(HttpStatus.OK, "{\"attemptId\":1,\"status\":\"APPROVED\"}");
+    }
+
+    @BeforeEach
+    void attemptsAreOpen() {
+        when(service.isAttemptOpen(anyLong())).thenReturn(true);
     }
 
     private void publishTarget(LocalDateTime verifySince) {
@@ -245,5 +251,50 @@ class AdPipelineTest {
         verify(service).failGenerate(eq(GENERATE_ATTEMPT_ID), anyString());
         verify(service, never()).completeGenerate(anyLong(), any());
         verifyNoInteractions(discord);
+    }
+
+    // ---- 닫힌 시도 ----
+
+    @Test
+    void 이미_닫힌_발행_시도는_조회도_게시도_하지_않는다() {
+        when(service.isAttemptOpen(PUBLISH_ATTEMPT_ID)).thenReturn(false);
+
+        pipeline().runPublish(EVENT_ID, new PublishTarget(PUBLISH_ATTEMPT_ID, CONTENT, SINCE));
+
+        verifyNoInteractions(facebook, discord);
+        verify(service, never()).completePublish(anyLong(), any(), any());
+        verify(service, never()).failPublish(anyLong(), anyString());
+    }
+
+    @Test
+    void 게시_여부_확인_중에_닫히면_게시하지_않는다() {
+        when(service.isAttemptOpen(PUBLISH_ATTEMPT_ID)).thenReturn(true, false);
+        when(facebook.findPostUrls(SINCE, CONTENT)).thenReturn(List.of());
+        when(service.findUnlinkedPostUrl(List.of())).thenReturn(Optional.empty());
+
+        pipeline().runPublish(EVENT_ID, new PublishTarget(PUBLISH_ATTEMPT_ID, CONTENT, SINCE));
+
+        verify(facebook, never()).publish(any());
+        verify(service, never()).completePublish(anyLong(), any(), any());
+        verify(service, never()).failPublish(anyLong(), anyString());
+        verifyNoInteractions(discord);
+    }
+
+    @Test
+    void 이미_닫힌_생성_시도는_agent를_호출하지_않는다() {
+        when(service.isAttemptOpen(GENERATE_ATTEMPT_ID)).thenReturn(false);
+        List<Object> agentCalls = new java.util.ArrayList<>();
+        WebClient agent = WebClient.builder().exchangeFunction(request -> {
+            agentCalls.add(request);
+            return Mono.empty();
+        }).build();
+
+        new AdPipeline(agent, service, facebook, discord).runGenerate(new AgentGenerateRequestDto(
+                GENERATE_ATTEMPT_ID, EVENT_ID, AdEventType.NEW, null, null, false), AttemptTrigger.MANUAL);
+
+        org.assertj.core.api.Assertions.assertThat(agentCalls).isEmpty();
+        verify(service, never()).completeGenerate(anyLong(), any());
+        verify(service, never()).failGenerate(anyLong(), anyString());
+        verifyNoInteractions(facebook, discord);
     }
 }

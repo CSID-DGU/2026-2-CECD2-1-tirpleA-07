@@ -38,6 +38,9 @@ public class AdPipeline {
     // 이미 시작된 GENERATE 시도를 실행 (agent 호출 -> 결과 저장 -> 승인되면 발행)
     public void runGenerate(AgentGenerateRequestDto request, AttemptTrigger trigger) {
         Long eventId = request.eventId();
+        if (!isStillOpen(eventId, request.attemptId(), "agent 호출")) {
+            return;
+        }
 
         AgentGenerateResponseDto response;
         try {
@@ -91,6 +94,10 @@ public class AdPipeline {
 
     // 이미 시작된 PUBLISH 시도를 실행 (게시 여부 확인 -> 게시 -> 결과 저장)
     public void runPublish(Long eventId, AdvertisementService.PublishTarget target) {
+        if (!isStillOpen(eventId, target.attemptId(), "게시 여부 확인·게시")) {
+            return;
+        }
+
         String postUrl = null;
         if (target.verifySince() != null) {
             Optional<String> found;
@@ -112,6 +119,10 @@ public class AdPipeline {
 
         // 발행 단계의 실패는 모두 FAILED로 기록 (게시됐을 수 있으므로 다음 시도에서 게시 여부 확인)
         if (postUrl == null) {
+            // 게시 여부 확인에 시간이 걸린 사이 닫혔을 수 있으므로 게시 직전에 한 번 더 확인
+            if (!isStillOpen(eventId, target.attemptId(), "게시")) {
+                return;
+            }
             try {
                 postUrl = facebookPublisher.publish(target.content());
             } catch (Exception e) {
@@ -133,6 +144,16 @@ public class AdPipeline {
         if (saved) {
             discordNotifier.notifyPublished(eventId, target.content().title(), postUrl);
         }
+    }
+
+    // 실행이 늦어진 시도(수동 재시도가 비동기 대기열에서 오래 기다린 경우 등)는 복구 스케줄러가 이미 닫고
+    // 다음 시도를 시작했을 수 있음. 닫힌 시도로 게시하면 다음 시도의 게시와 겹쳐 중복 게시가 되므로 실행하지 않음
+    private boolean isStillOpen(Long eventId, Long attemptId, String action) {
+        if (advertisementService.isAttemptOpen(attemptId)) {
+            return true;
+        }
+        log.info("[닫힌 시도 실행 안 함] eventId={}, attemptId={}, 건너뛴 작업: {}", eventId, attemptId, action);
+        return false;
     }
 
     private void failGenerate(Long eventId, Long attemptId, String message) {
