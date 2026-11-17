@@ -138,6 +138,28 @@ class FacebookPublisherTest {
     }
 
     @Test
+    void 다음_페이지_주소에_토큰이_있으면_빼고_요청한다() {
+        publisher(page(NEXT + "?access_token=" + TOKEN + "&after=QVFI%3D%3D&limit=100"), page(null))
+                .findPostUrls(SINCE, CONTENT);
+
+        String url = requests.get(1).url().toString();
+        assertThat(url).doesNotContain(TOKEN).doesNotContain("access_token")
+                .isEqualTo(NEXT + "?after=QVFI%3D%3D&limit=100");
+        assertThat(requests.get(1).headers().getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer " + TOKEN);
+    }
+
+    @Test
+    void 다음_페이지_주소에_토큰이_있어도_조회_실패_메시지에_남지_않는다() {
+        FacebookPublisher publisher = publisher(List.of(
+                response(HttpStatus.OK, page(NEXT + "?access_token=" + TOKEN + "&after=a")),
+                response(HttpStatus.INTERNAL_SERVER_ERROR, "{\"error\":{\"message\":\"x\"}}")));
+
+        assertThatThrownBy(() -> publisher.findPostUrls(SINCE, CONTENT))
+                .isInstanceOf(WebClientResponseException.class)
+                .hasMessageNotContaining(TOKEN);
+    }
+
+    @Test
     void 다음_페이지_요청에도_토큰은_헤더로만_보낸다() {
         publisher(page(NEXT + "?after=a"), page(null)).findPostUrls(SINCE, CONTENT);
 

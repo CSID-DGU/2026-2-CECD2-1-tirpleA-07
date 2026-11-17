@@ -10,6 +10,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.time.Duration;
@@ -135,6 +136,8 @@ public class FacebookPublisher {
 
     // 다음 페이지 주소(paging.next)는 Facebook이 준 값이므로, 설정한 Graph API와 같은 scheme·host일 때만 요청함
     // (토큰을 다른 곳에 보내지 않기 위함). 경로는 비교하지 않음 (설정 끝의 / 유무, 버전 경로 차이에 영향받지 않게)
+    // 주소에 access_token이 있으면 빼고 요청함. 토큰은 헤더로만 보내고, 요청이 실패해도 예외 메시지(URL 포함)에 남지 않게 함
+    // (헤더로 조회하면 Facebook이 next에 토큰을 넣지 않는 것을 확인했지만, 형식이 바뀌어도 새지 않도록)
     // 주소 자체는 예외 메시지에 남기지 않음
     private URI nextPageUri(String next) {
         URI uri;
@@ -146,7 +149,7 @@ public class FacebookPublisher {
         if (!sameOrigin(uri, apiUri)) {
             throw new IllegalStateException("게시물 조회의 다음 페이지 주소가 Graph API 주소가 아님");
         }
-        return uri;
+        return UriComponentsBuilder.fromUri(uri).replaceQueryParam("access_token").build(true).toUri();
     }
 
     private static boolean sameOrigin(URI target, URI base) {
