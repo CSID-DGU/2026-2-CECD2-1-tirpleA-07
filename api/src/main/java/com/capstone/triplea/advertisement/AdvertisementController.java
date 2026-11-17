@@ -4,11 +4,13 @@ import com.capstone.triplea.advertisement.dto.AdEventDetailDto;
 import com.capstone.triplea.advertisement.dto.AdEventSortType;
 import com.capstone.triplea.advertisement.dto.AdEventSummaryDto;
 import com.capstone.triplea.advertisement.dto.AdvertisementResponseDto;
+import com.capstone.triplea.advertisement.dto.RetryAcceptedDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +24,8 @@ import java.util.List;
 public class AdvertisementController {
     private final AdvertisementService advertisementService;
     private final AdEventQueryService adEventQueryService;
+    private final AdRetryService adRetryService;
+    private final AdRetryRunner adRetryRunner;
 
     @Operation(
             summary = "광고 이력 전체 조회",
@@ -61,5 +65,30 @@ public class AdvertisementController {
     @GetMapping("/events/{eventId}")
     public ResponseEntity<AdEventDetailDto> getEvent(@PathVariable Long eventId) {
         return ResponseEntity.ok(adEventQueryService.findEvent(eventId));
+    }
+
+    @Operation(
+            summary = "광고 이벤트 수동 재시도",
+            description = "FAILED 이벤트를 다시 처리. 승인된 생성 결과가 있으면 발행부터(게시 여부 확인 포함), 없으면 생성부터 시작. "
+                    + "시도를 시작한 뒤 바로 응답하고 처리는 이어서 진행되므로 결과는 상세 조회로 확인"
+    )
+    @ApiResponse(responseCode = "202", description = "재시도 시작")
+    @ApiResponse(responseCode = "404", description = "이벤트 없음")
+    @ApiResponse(responseCode = "409",
+            description = "재시도 불가. code: NOT_FAILED(FAILED가 아님) | PUBLISH_WAIT(발행 실패 후 대기 중) | CONFLICT(다른 요청이 먼저 시작)")
+    @PostMapping("/events/{eventId}/retry")
+    public ResponseEntity<RetryAcceptedDto> retryEvent(@PathVariable Long eventId) {
+        AdRetryService.RetryStarted started;
+        try {
+            started = adRetryService.start(eventId);
+        } catch (OptimisticLockingFailureException e) {
+            // 커밋 시점에 알게 된 선점 충돌
+            throw new RetryRejectedException(RetryRejectedException.Code.CONFLICT,
+                    "다른 요청이 먼저 재시도를 시작함: eventId=" + eventId, e);
+        }
+        // 시도 시작이 커밋된 뒤 실행을 넘김
+        adRetryRunner.run(started);
+        return ResponseEntity.accepted()
+                .body(new RetryAcceptedDto(started.eventId(), started.attemptId(), started.attemptType()));
     }
 }
