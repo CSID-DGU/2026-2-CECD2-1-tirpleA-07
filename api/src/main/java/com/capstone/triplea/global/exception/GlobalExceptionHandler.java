@@ -1,5 +1,8 @@
 package com.capstone.triplea.global.exception;
 
+import com.capstone.triplea.advertisement.AdEventNotFoundException;
+import com.capstone.triplea.advertisement.RetryRejectedException;
+import com.capstone.triplea.advertisement.dto.AdErrorDto;
 import com.capstone.triplea.product.exception.ProductNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,5 +32,19 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(message);
+    }
+
+    // 404: 존재하지 않는 광고 이벤트
+    @ExceptionHandler(AdEventNotFoundException.class)
+    public ResponseEntity<AdErrorDto> handleAdEventNotFound(AdEventNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new AdErrorDto("EVENT_NOT_FOUND", e.getMessage(), null));
+    }
+
+    // 409: 수동 재시도를 받아들일 수 없음 (code로 사유 구분)
+    @ExceptionHandler(RetryRejectedException.class)
+    public ResponseEntity<AdErrorDto> handleRetryRejected(RetryRejectedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new AdErrorDto(e.getCode().name(), e.getMessage(), e.getRetryAvailableAt()));
     }
 }

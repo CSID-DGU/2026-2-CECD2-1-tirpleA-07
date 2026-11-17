@@ -1,10 +1,12 @@
 package com.capstone.triplea.advertisement;
 
+import com.capstone.triplea.advertisement.dto.AdEventDetailDto;
 import com.capstone.triplea.advertisement.dto.AdEventSortType;
 import com.capstone.triplea.advertisement.dto.AdEventSummaryDto;
 import com.capstone.triplea.advertisement.dto.AdvertisementResponseDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -48,5 +50,16 @@ public class AdvertisementController {
             @Parameter(description = "페이지 크기 (최대 100)")
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(adEventQueryService.findEvents(status, productId, sort, page, size));
+    }
+
+    @Operation(
+            summary = "광고 이벤트 상세 조회",
+            description = "시도 이력, 시도별 생성 결과와 심의 근거(초안, 판정 사유, 투표, 위반 항목), 게시물, 수동 재시도 가능 여부를 반환"
+    )
+    @ApiResponse(responseCode = "200", description = "조회 성공")
+    @ApiResponse(responseCode = "404", description = "이벤트 없음")
+    @GetMapping("/events/{eventId}")
+    public ResponseEntity<AdEventDetailDto> getEvent(@PathVariable Long eventId) {
+        return ResponseEntity.ok(adEventQueryService.findEvent(eventId));
     }
 }
