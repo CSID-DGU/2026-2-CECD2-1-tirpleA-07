@@ -15,6 +15,7 @@ import java.util.Optional;
 // 광고 처리 흐름: 생성(agent) -> 발행(Facebook)
 // 외부 호출은 트랜잭션 밖에서 하고, 앞뒤 상태는 AdvertisementService가 짧은 트랜잭션으로 저장
 // 최초 이벤트, 복구 스케줄러, 수동 재시도가 같은 흐름을 쓰고, 호출한 스레드에서 끝까지 실행
+// 시도 시작(start*)과 실행(run*)을 나눠 둠: 수동 재시도는 요청 트랜잭션에서 시도를 시작한 뒤 실행만 호출
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -31,7 +32,12 @@ public class AdPipeline {
     // 생성 시도. 승인되면 같은 trigger로 발행까지 이어서 실행
     // 시도를 시작할 수 없으면(이벤트가 PENDING이 아님, 진행 중인 시도 있음, 선점 충돌) AttemptStartRejectedException
     public void generate(Long eventId, AttemptTrigger trigger) {
-        AgentGenerateRequestDto request = advertisementService.startGenerate(eventId, trigger);
+        runGenerate(advertisementService.startGenerate(eventId, trigger), trigger);
+    }
+
+    // 이미 시작된 GENERATE 시도를 실행 (agent 호출 -> 결과 저장 -> 승인되면 발행)
+    public void runGenerate(AgentGenerateRequestDto request, AttemptTrigger trigger) {
+        Long eventId = request.eventId();
 
         AgentGenerateResponseDto response;
         try {
@@ -80,8 +86,11 @@ public class AdPipeline {
     // 발행 시도 (승인된 생성 결과가 있어야 함)
     // 이전 발행 시도가 있었으면 이미 게시됐을 수 있으므로, 게시 전에 페이지에 게시된 글을 조회해 게시 여부를 확인
     public void publish(Long eventId, AttemptTrigger trigger) {
-        AdvertisementService.PublishTarget target = advertisementService.startPublish(eventId, trigger);
+        runPublish(eventId, advertisementService.startPublish(eventId, trigger));
+    }
 
+    // 이미 시작된 PUBLISH 시도를 실행 (게시 여부 확인 -> 게시 -> 결과 저장)
+    public void runPublish(Long eventId, AdvertisementService.PublishTarget target) {
         String postUrl = null;
         if (target.verifySince() != null) {
             Optional<String> found;
