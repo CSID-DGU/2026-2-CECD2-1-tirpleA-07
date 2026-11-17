@@ -39,7 +39,7 @@ public class FacebookPublisher {
     private static final int MAX_LOOKUP_PAGES = 10;
 
     private final WebClient webClient;
-    private final String apiUrl;
+    private final URI apiUri;
     private final String pageId;
     private final String token;
 
@@ -49,7 +49,7 @@ public class FacebookPublisher {
             @Value("${facebook.page-id}") String pageId,
             @Value("${facebook.token}") String token) {
         this.webClient = webClientBuilder.baseUrl(apiUrl).build();
-        this.apiUrl = apiUrl;
+        this.apiUri = URI.create(apiUrl);
         this.pageId = pageId;
         this.token = token;
     }
@@ -133,17 +133,27 @@ public class FacebookPublisher {
         return matches.stream().map(post -> toPostUrl(post.get("id").asText())).toList();
     }
 
-    // 다음 페이지 주소(paging.next)는 Facebook이 준 값이므로, 설정한 Graph API 주소일 때만 요청함 (토큰을 다른 곳에 보내지 않기 위함)
+    // 다음 페이지 주소(paging.next)는 Facebook이 준 값이므로, 설정한 Graph API와 같은 scheme·host일 때만 요청함
+    // (토큰을 다른 곳에 보내지 않기 위함). 경로는 비교하지 않음 (설정 끝의 / 유무, 버전 경로 차이에 영향받지 않게)
     // 주소 자체는 예외 메시지에 남기지 않음
     private URI nextPageUri(String next) {
-        if (!next.startsWith(apiUrl + "/")) {
-            throw new IllegalStateException("게시물 조회의 다음 페이지 주소가 Graph API 주소가 아님");
-        }
+        URI uri;
         try {
-            return URI.create(next);
+            uri = URI.create(next);
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("게시물 조회의 다음 페이지 주소 형식이 올바르지 않음");
         }
+        if (!sameOrigin(uri, apiUri)) {
+            throw new IllegalStateException("게시물 조회의 다음 페이지 주소가 Graph API 주소가 아님");
+        }
+        return uri;
+    }
+
+    private static boolean sameOrigin(URI target, URI base) {
+        return target.getScheme() != null && target.getScheme().equalsIgnoreCase(base.getScheme())
+                && target.getHost() != null && target.getHost().equalsIgnoreCase(base.getHost())
+                && target.getPort() == base.getPort()
+                && target.getRawUserInfo() == null;
     }
 
     // 비교용 정규화. 보낸 메시지와 Facebook에 저장된 메시지를 같은 형태로 맞춤

@@ -71,11 +71,19 @@ class FacebookPublisherTest {
     }
 
     private FacebookPublisher publisher(List<ClientResponse> responses) {
+        return publisherAt("https://graph.example.com/v1", responses);
+    }
+
+    private FacebookPublisher publisherAt(String apiUrl, String... bodies) {
+        return publisherAt(apiUrl, java.util.Arrays.stream(bodies).map(body -> response(HttpStatus.OK, body)).toList());
+    }
+
+    private FacebookPublisher publisherAt(String apiUrl, List<ClientResponse> responses) {
         WebClient.Builder builder = WebClient.builder().exchangeFunction(request -> {
             requests.add(request);
             return Mono.just(responses.get(Math.min(requests.size(), responses.size()) - 1));
         });
-        return new FacebookPublisher(builder, "https://graph.example.com/v1", "111", TOKEN);
+        return new FacebookPublisher(builder, apiUrl, "111", TOKEN);
     }
 
     @Test
@@ -165,8 +173,12 @@ class FacebookPublisherTest {
     void 다음_페이지_주소가_Graph_API_주소가_아니면_요청하지_않고_확인_불가다() {
         for (String next : List.of(
                 "https://evil.example.com/v1/111/published_posts?after=a",
-                "https://graph.example.com/v1.evil.example.com/x",
-                "https://graph.example.com/v1")) {
+                "https://graph.example.com.evil.example.com/v1/111/published_posts",
+                "https://evil.example.com@graph.example.com/v1/111/published_posts",
+                "http://graph.example.com/v1/111/published_posts",
+                "https://graph.example.com:8443/v1/111/published_posts",
+                "/v1/111/published_posts?after=a",
+                "not a uri")) {
             requests.clear();
             FacebookPublisher publisher = publisher(page(next, post("111_2", MESSAGE, "2026-11-14T03:01:00+0000")), page(null));
 
@@ -174,6 +186,19 @@ class FacebookPublisherTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageNotContaining("evil");
             assertThat(requests).hasSize(1);
+        }
+    }
+
+    @Test
+    void 설정_주소_끝의_슬래시나_버전_경로가_달라도_같은_호스트면_다음_페이지를_읽는다() {
+        for (String apiUrl : List.of("https://graph.example.com/v1/", "https://graph.example.com")) {
+            requests.clear();
+            FacebookPublisher publisher = publisherAt(apiUrl,
+                    page("https://GRAPH.example.com/v2/111/published_posts?after=a"),
+                    page(null, post("111_5", MESSAGE, "2026-11-14T03:01:00+0000")));
+
+            assertThat(publisher.findPostUrls(SINCE, CONTENT)).containsExactly("https://www.facebook.com/111/posts/5");
+            assertThat(requests).hasSize(2);
         }
     }
 
