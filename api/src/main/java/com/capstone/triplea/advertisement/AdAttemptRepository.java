@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -13,6 +14,9 @@ public interface AdAttemptRepository extends JpaRepository<AdAttempt, Long> {
 
     // 이벤트의 시도 이력 (시간순)
     List<AdAttempt> findByEventIdOrderByStartedAtAscIdAsc(Long eventId);
+
+    // 여러 이벤트의 시도 이력 (시간순) - 이벤트 목록 조회
+    List<AdAttempt> findByEventIdInOrderByStartedAtAscIdAsc(Collection<Long> eventIds);
 
     // 이벤트의 최신 시도 (다음 할 일 판단 기준)
     Optional<AdAttempt> findFirstByEventIdOrderByStartedAtDescIdDesc(Long eventId);
