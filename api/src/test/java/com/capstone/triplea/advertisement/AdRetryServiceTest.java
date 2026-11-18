@@ -137,6 +137,7 @@ class AdRetryServiceTest {
         AdTestFixture.approve(advertisementService, eventId, null);
         Long lastAttemptId = AdTestFixture.failPublishUntilEventFailed(advertisementService, eventId);
         em.flush();
+        em.clear();
         LocalDateTime finishedAt = em.find(AdAttempt.class, lastAttemptId).getFinishedAt();
 
         RetryRejectedException rejected =
@@ -154,6 +155,8 @@ class AdRetryServiceTest {
         AdTestFixture.approve(advertisementService, eventId, null);
         Long lastAttemptId = AdTestFixture.failPublishUntilEventFailed(advertisementService, eventId);
         em.flush();
+        // DB에 저장된 값으로 비교함 (메모리의 시각은 OS에 따라 나노초까지 있어 DB에서 다시 읽은 값과 다를 수 있음)
+        em.clear();
         LocalDateTime finishedAt = em.find(AdAttempt.class, lastAttemptId).getFinishedAt();
 
         RetryCheck before = retryService.check(event(), finishedAt.plusMinutes(4));
