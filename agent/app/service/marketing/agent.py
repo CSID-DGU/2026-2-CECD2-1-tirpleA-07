@@ -6,11 +6,13 @@ from openai.types.chat import ChatCompletion
 from app.common.enum.event_type import EventType
 from app.common.dto.agent_result import AdContent
 from app.common.dto.product import Product
-from app.service.marketing.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.service.marketing.prompts import IMAGE_INSTRUCTION, SYSTEM_PROMPT, build_user_prompt
 from app.service.marketing.tools import TOOLS, TOOL_MAP
 from app.service.marketing.product_samples import PRODUCT_SAMPLES
 from app.util.ai_client import get_ai_client
 from app.util.json_output import parse_json_object
+
+from app.util.image_io import to_data_url
 
 load_dotenv()
 
@@ -54,7 +56,11 @@ async def run_with_tools(response: ChatCompletion, messages: list):
 
     return response
 
-async def product_marketing(event_type: EventType, is_sample: bool, product_new: Product, product_old: Product | None):
+async def product_marketing(event_type: EventType,
+                            is_sample: bool,
+                            product_new: Product,
+                            product_old: Product | None,
+                            product_image: bytes | None = None):
     # 파라미터에 따라 샘플 데이터로 테스트 가능
     if is_sample:
         new = PRODUCT_SAMPLES[0] if event_type == EventType.NEW else PRODUCT_SAMPLES[1]
@@ -70,7 +76,7 @@ async def product_marketing(event_type: EventType, is_sample: bool, product_new:
             },
             {
                 "role": "user",
-                "content": build_user_prompt(event_type, new, old)
+                "content": _user_content(build_user_prompt(event_type, new, old), product_image)
             }
         ]
     response = await client.chat.completions.create(
@@ -83,12 +89,26 @@ async def product_marketing(event_type: EventType, is_sample: bool, product_new:
 
     return response.choices[0].message.content
 
+# 상품 이미지가 있으면 텍스트와 이미지를 함께 보냄 (Track C-1 Vision 입력)
+def _user_content(prompt: str, product_image: bytes | None) -> str | list:
+    if product_image is None:
+        return prompt
+    return [
+        {"type": "text", "text": prompt + IMAGE_INSTRUCTION},
+        {"type": "image_url", "image_url": {"url": to_data_url(product_image)}},
+    ]
 
 # 마케팅 초안 생성 (/generate용): 응답을 AdContent로 파싱하고, 실패하면 1회 재호출
-async def generate_draft(event_type: EventType, is_sample: bool, product_new: Product, product_old: Product | None) -> AdContent:
+async def generate_draft(
+        event_type: EventType,
+        is_sample: bool,
+        product_new: Product,
+        product_old: Product | None,
+        product_image: bytes | None = None
+) -> AdContent:
     last_error: Exception | None = None
     for _ in range(MAX_PARSE_ATTEMPTS):
-        raw = await product_marketing(event_type, is_sample, product_new, product_old)
+        raw = await product_marketing(event_type, is_sample, product_new, product_old, product_image)
         try:
             return AdContent.model_validate(parse_json_object(raw))
         except ValueError as e:     # JSON 파싱 실패, 필수 필드 누락 (ValidationError 포함)

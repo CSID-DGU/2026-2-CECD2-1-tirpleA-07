@@ -11,6 +11,7 @@ from app.service.marketing import generate_draft, product_marketing
 from app.service.review import product_reviewing, review_draft
 from app.util.discord_logger import discord_send_message
 from app.util.sns_adapter import call_facebook_api
+from app.util.image_io import load_product_image
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,11 @@ async def generate(body: GenerateRequest) -> AgentResult:
         3447003
     )
 
+    # 상품 이미지: 문구 생성(Vision 입력)에 사용. 없거나 못 받으면 텍스트만으로 진행
+    product_image = await load_product_image(body.product_new.image_url)
+
     try:
-        draft = await generate_draft(body.event_type, body.is_sample, body.product_new, body.product_old)
+        draft = await generate_draft(body.event_type, body.is_sample, body.product_new, body.product_old, product_image)
     except Exception as e:
         logger.exception("마케팅 단계 실패 (%s)", tag)
         return AgentResult.failed(body.attempt_id, FailedStage.MARKETING, _describe(e))
