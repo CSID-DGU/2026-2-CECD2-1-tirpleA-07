@@ -13,6 +13,9 @@ from app.util.discord_logger import discord_send_message
 from app.util.sns_adapter import call_facebook_api
 from app.util.image_io import load_product_image
 
+import asyncio
+from app.service.image import IMAGE_GENERATION_ENABLED, generate_ad_image, save_ad_image
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -128,11 +131,23 @@ async def generate(body: GenerateRequest) -> AgentResult:
     # 상품 이미지: 문구 생성(Vision 입력)에 사용. 없거나 못 받으면 텍스트만으로 진행
     product_image = await load_product_image(body.product_new.image_url)
 
+    # 이미지 생성은 문구와 무관하므로 문구 생성과 동시에 시작
+    image_task = None
+    if IMAGE_GENERATION_ENABLED and product_image is not None:
+        image_task = asyncio.create_task(_make_ad_image(product_image, tag))
+
     try:
         draft = await generate_draft(body.event_type, body.is_sample, body.product_new, body.product_old, product_image)
     except Exception as e:
         logger.exception("마케팅 단계 실패 (%s)", tag)
+        if image_task is not None:
+            image_task.cancel()          # 문구가 실패했으면 이미지도 필요 없음
         return AgentResult.failed(body.attempt_id, FailedStage.MARKETING, _describe(e))
+
+    if image_task is not None:
+        image_url = await image_task
+        if image_url is not None:
+            draft = draft.model_copy(update={"image_url": image_url})
 
     _notify("✨ Marketing Content Generated", draft.model_dump_json(exclude_none=True), 9109759)
 
@@ -152,6 +167,14 @@ async def generate(body: GenerateRequest) -> AgentResult:
         return AgentResult.approved(body.attempt_id, draft, outcome.content, outcome.review)
     return AgentResult.rejected(body.attempt_id, draft, outcome.review)
 
+# 실패해도 광고를 막지 않는 래퍼 함수
+async def _make_ad_image(product_image: bytes, tag: str) -> str | None:
+    try:
+        return save_ad_image(await generate_ad_image(product_image))
+    except Exception as e:
+        logger.exception("광고 이미지 생성 실패, 이미지 없이 진행 (%s)", tag)
+        _notify("🖼️ Image Generation Failed", f"- {tag}\n- {_describe(e)[:500]}", 15105570)
+        return None
 
 # Discord 전송 실패가 처리 결과에 영향을 주지 않도록 예외를 기록만 함
 def _notify(title: str, description: str, color: int):
