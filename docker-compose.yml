@@ -3,6 +3,7 @@ services:
     build: ./api
     volumes:
       - ./wallet:/wallet
+      - ad-images:/data/ad-images
     env_file:
       - ./api/.env
     container_name: spring-api
@@ -17,8 +18,13 @@ services:
     build: ./agent
     volumes:
       - ./wallet:/wallet
+      - ad-images:/data/ad-images
     env_file:
       - ./agent/.env
     container_name: fastapi-agent
     expose:
       - "8000"
+
+# 생성 광고 이미지: agent가 저장하고 api가 Facebook 업로드와 콘솔 제공에 사용
+volumes:
+  ad-images:
