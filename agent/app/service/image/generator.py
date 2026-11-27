@@ -61,5 +61,5 @@ async def generate_ad_image(product_image: bytes) -> bytes:
     if not url or not url.startswith("data:image"):
         raise RuntimeError(f"이미지 생성 응답에 이미지 없음: {str(result)[:300]}")
     #크레딧 기록 및 디코딩
-    logger.info("이미지 생성 완료: model=%s, credits=%s", IMAGE_MODEL, result.get("credits"))
+    logger.info("이미지 생성 완료: model=%s, credits=%s", IMAGE_MODEL, result.get("credits_charged"))
     return shrink_to_jpeg(base64.b64decode(url.split(",",1)[1]))
