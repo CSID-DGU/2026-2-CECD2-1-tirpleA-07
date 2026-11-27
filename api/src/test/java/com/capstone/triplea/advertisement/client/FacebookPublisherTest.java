@@ -102,7 +102,7 @@ class FacebookPublisherTest {
             requests.add(request);
             return Mono.just(responses.get(Math.min(requests.size(), responses.size()) - 1));
         });
-        return new FacebookPublisher(builder, apiUrl, "111", TOKEN);
+        return new FacebookPublisher(builder, apiUrl, "111", TOKEN, new AdImageStorage(imageDir.toString()));
     }
 
     @Test
