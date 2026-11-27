@@ -87,7 +87,7 @@ async def review_draft(
         product_old: Product | None,
         draft: AdContent
     ) -> ReviewOutcome:
-    marketing_content = draft.model_dump_json(exclude_none=True)
+    marketing_content = draft.model_dump_json(exclude_none=True, exclude={"image_url"})
 
     last_error: Exception | None = None
     for _ in range(MAX_PARSE_ATTEMPTS):
@@ -99,7 +99,7 @@ async def review_draft(
             continue
 
         # 심의는 문구만 수정하므로 초안의 이미지는 그대로 유지
-        if outcome.content is not None and outcome.content.image_url is None and draft.image_url:
+        if outcome.content is not None and outcome.content.image_url != draft.image_url:
             outcome = ReviewOutcome(
                 accepted=outcome.accepted,
                 content=outcome.content.model_copy(update={"image_url": draft.image_url}),

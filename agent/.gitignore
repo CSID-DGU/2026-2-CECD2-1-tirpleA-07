@@ -131,6 +131,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+eval/input/
+eval/out/
+eval/check_*.py
 
 # Spyder project settings
 .spyderproject

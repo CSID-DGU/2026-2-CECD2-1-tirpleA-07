@@ -18,6 +18,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.capstone.triplea.advertisement.image.AdImageStorage;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 class FacebookPublisherTest {
 
@@ -26,10 +34,14 @@ class FacebookPublisherTest {
     private static final AdContent CONTENT =
             new AdContent("다낭 특가", "4박 5일 일정", "지금 예약하세요", List.of("#다낭", "#특가"), null);
     private static final String MESSAGE = "다낭 특가\\n4박 5일 일정\\n지금 예약하세요\\n#다낭 #특가";
+    private static final String IMAGE_NAME = "0123456789abcdef0123456789abcdef.jpg";
 
     private static final String NEXT = "https://graph.example.com/v1/111/published_posts";
 
     private final List<ClientRequest> requests = new ArrayList<>();
+
+    @TempDir
+    Path imageDir;       // 테스트마다 새 임시 폴더
 
     // 정해진 응답을 돌려주는 가짜 Facebook
     private FacebookPublisher publisher(HttpStatus status, String body) {
@@ -40,7 +52,14 @@ class FacebookPublisherTest {
                     .body(body)
                     .build());
         });
-        return new FacebookPublisher(builder, "https://graph.example.com/v1", "111", TOKEN);
+        return new FacebookPublisher(builder, "https://graph.example.com/v1", "111", TOKEN, new AdImageStorage(imageDir.toString()));
+    }
+
+    // 요청 본문을 문자열로 (multipart 본문 확인용)
+    private static String bodyOf(ClientRequest request) {
+        MockClientHttpRequest captured = new MockClientHttpRequest(request.method(), request.url());
+        request.writeTo(captured, ExchangeStrategies.withDefaults()).block();
+        return captured.getBodyAsString().block();
     }
 
     private static String post(String id, String message, String createdTime) {
@@ -83,7 +102,7 @@ class FacebookPublisherTest {
             requests.add(request);
             return Mono.just(responses.get(Math.min(requests.size(), responses.size()) - 1));
         });
-        return new FacebookPublisher(builder, apiUrl, "111", TOKEN);
+        return new FacebookPublisher(builder, apiUrl, "111", TOKEN, new AdImageStorage(imageDir.toString()));
     }
 
     @Test
@@ -289,5 +308,51 @@ class FacebookPublisherTest {
         String sentWithoutHashtags = "그리스 산토리니 7일\n에게해의 석양을 만나 보세요.\n지금 예약하기\n";
         String storedWithoutHashtags = "그리스 산토리니 7일\n에게해의 석양을 만나 보세요.\n지금 예약하기";
         assertThat(FacebookPublisher.normalize(storedWithoutHashtags)).isEqualTo(FacebookPublisher.normalize(sentWithoutHashtags));
+    }
+
+    @Test
+    void 이미지가_없으면_피드에_글로_게시한다() {
+        String url = publisher(HttpStatus.OK, "{\"id\":\"111_9\"}").publish(CONTENT);
+
+        assertThat(url).isEqualTo("https://www.facebook.com/111/posts/9");
+        assertThat(requests.get(0).url().getPath()).isEqualTo("/v1/111/feed");
+    }
+
+    @Test
+    void 이미지가_있으면_파일을_사진으로_올리고_post_id로_URL을_만든다() throws IOException{
+        Files.write(imageDir.resolve(IMAGE_NAME), new byte[]{1, 2, 3});
+        AdContent withImage = new AdContent("다낭 특가", "4박 5일 일정", "지금 예약하세요", List.of("#다낭", "#특가"),
+                AdImageStorage.URL_PREFIX + IMAGE_NAME);
+
+        String url = publisher(HttpStatus.OK, "{\"id\":\"777\",\"post_id\":\"111_9\"}").publish(withImage);
+
+        assertThat(url).isEqualTo("https://www.facebook.com/111/posts/9");
+        ClientRequest request = requests.get(0);
+        assertThat(request.url().getPath()).isEqualTo("/v1/111/photos");
+        assertThat(request.url().toString()).doesNotContain(TOKEN);
+        assertThat(request.headers().getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer " + TOKEN);
+        assertThat(bodyOf(request))
+                .contains("name=\"source\"")
+                .contains("filename=\"ad.jpg\"")
+                .contains("name=\"message\"")
+                .contains("다낭 특가\n4박 5일 일정\n지금 예약하세요\n#다낭 #특가");
+    }
+
+    @Test
+    void 이미지_파일이_없으면_게시하지_않고_예외() {
+        AdContent withImage = new AdContent("제목", "본문", "CTA", List.of(), AdImageStorage.URL_PREFIX + IMAGE_NAME);
+
+        assertThatThrownBy(() -> publisher(HttpStatus.OK, "{\"id\":\"777\",\"post_id\":\"111_9\"}").publish(withImage))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void 사진응답에_post_id가_없으면_예외() throws IOException {
+        Files.write(imageDir.resolve(IMAGE_NAME), new byte[]{1});
+        AdContent withImage = new AdContent("제목", "본문", "CTA", List.of(), AdImageStorage.URL_PREFIX + IMAGE_NAME);
+
+        assertThatThrownBy(() -> publisher(HttpStatus.OK, "{\"id\":\"777\"}").publish(withImage))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

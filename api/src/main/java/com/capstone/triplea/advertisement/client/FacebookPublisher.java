@@ -10,6 +10,9 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import com.capstone.triplea.advertisement.image.AdImageStorage;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -43,20 +46,27 @@ public class FacebookPublisher {
     private final URI apiUri;
     private final String pageId;
     private final String token;
+    private final AdImageStorage adImageStorage;
 
     public FacebookPublisher(
             WebClient.Builder webClientBuilder,
             @Value("${facebook.api-url}") String apiUrl,
             @Value("${facebook.page-id}") String pageId,
-            @Value("${facebook.token}") String token) {
+            @Value("${facebook.token}") String token, AdImageStorage adImageStorage) {
         this.webClient = webClientBuilder.baseUrl(apiUrl).build();
         this.apiUri = URI.create(apiUrl);
         this.pageId = pageId;
         this.token = token;
+        this.adImageStorage = adImageStorage;
     }
 
     // 콘텐츠를 페이지 피드에 게시하고 게시글 URL을 반환 (실패 시 예외)
     public String publish(AdContent content) {
+        return content.imageUrl() == null ? publishText(content) : publishPhoto(content);
+    }
+    // 이미지가 있으면 사진 게시물(/photos, 문구는 사진 설명), 없으면 글 게시물(/feed)
+    // 두 경우 모두 published_posts의 message가 같은 문구라 findPostUrls로 게시 여부를 확인할 수 있음
+    private String publishText(AdContent content) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("message", buildMessage(content));
         form.add("access_token", token);
@@ -70,6 +80,38 @@ public class FacebookPublisher {
                 .block(TIMEOUT);
 
         String postId = (response == null || !response.hasNonNull("id")) ? null : response.get("id").asText();
+        if (postId == null || !postId.contains("_")) {
+            throw new IllegalStateException("Facebook 응답에 게시물 id 없음: " + response);
+        }
+        return toPostUrl(postId);
+    }
+
+    // 공유 볼륨의 이미지 파일을 직접 업로드 (Facebook이 가져갈 공개 URL이 없어도 됨)
+    // 이미지 파일이 없으면 예외 (문구만 게시하면 승인된 콘텐츠와 달라지므로 게시하지 않음)
+    // 토큰은 헤더로 보내 요청 URL(예외 메시지에 포함됨)에 남지 않게 함
+    private String publishPhoto(AdContent content) {
+        byte[] image = adImageStorage.read(content.imageUrl());
+
+        MultipartBodyBuilder multipart = new MultipartBodyBuilder();
+        multipart.part("source", new ByteArrayResource(image) {
+            @Override
+            public String getFilename() {
+                return "ad.jpg";
+            }
+        }).contentType(MediaType.IMAGE_JPEG);
+        multipart.part("message", buildMessage(content));
+
+        JsonNode response = webClient.post()
+                .uri("/{pageId}/photos", pageId)
+                .headers(headers -> headers.setBearerAuth(token))
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(multipart.build()))
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .block(TIMEOUT);
+
+        // 응답의 id는 사진 id, post_id가 게시물 id ({pageId}_{postId})
+        String postId = (response == null || !response.hasNonNull("post_id")) ? null : response.get("post_id").asText();
         if (postId == null || !postId.contains("_")) {
             throw new IllegalStateException("Facebook 응답에 게시물 id 없음: " + response);
         }
